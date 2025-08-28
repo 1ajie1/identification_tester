@@ -20,13 +20,6 @@ ApplicationWindow {
     property color borderColor: "#E0E0E0"
     
     // 主显示区域 - 只保留核心显示功能
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: 20
-        color: cardColor
-        radius: 12
-        border.color: borderColor
-        border.width: 1
         
         StackLayout {
             id: displayStack
@@ -41,34 +34,19 @@ ApplicationWindow {
                     spacing: 20
                     
                     // 第一张图片显示区域
-                    Rectangle {
+                    ColumnLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        color: "#FAFAFA"
-                        radius: 8
-                        border.color: borderColor
-                        border.width: 1
+                        spacing: 10
                         
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 15
-                            spacing: 10
-                            
-                            Text {
-                                text: "图片 1"
-                                font.pixelSize: 16
-                                font.bold: true
-                                color: textColor
-                                Layout.alignment: Qt.AlignHCenter
-                            }
-                            
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                color: "white"
-                                radius: 6
-                                border.color: borderColor
-                                border.width: 1
+                        
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            color: "white"
+                            radius: 6
+                            border.color: borderColor
+                            border.width: 1
                                 
                                 Image {
                                     id: image1Display
@@ -129,17 +107,16 @@ ApplicationWindow {
                                     onClicked: fileDialog1.open()
                                 }
                             }
-                            
-                            Text {
-                                text: controller.image1Path ? 
-                                      controller.image1Path.split('/').pop() || controller.image1Path.split('\\').pop() : 
-                                      "未选择文件"
-                                font.pixelSize: 12
-                                color: "#666666"
-                                elide: Text.ElideMiddle
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter
-                            }
+                        
+                        Text {
+                            text: controller.image1Path ? 
+                                  controller.image1Path.split('/').pop() || controller.image1Path.split('\\').pop() : 
+                                  "未选择文件"
+                            font.pixelSize: 12
+                            color: "#666666"
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignHCenter
                         }
                     }
                     
@@ -179,34 +156,18 @@ ApplicationWindow {
                     }
                     
                     // 第二张图片显示区域
-                    Rectangle {
+                    ColumnLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        color: "#FAFAFA"
-                        radius: 8
-                        border.color: borderColor
-                        border.width: 1
+                        spacing: 10
                         
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 15
-                            spacing: 10
-                            
-                            Text {
-                                text: "图片 2"
-                                font.pixelSize: 16
-                                font.bold: true
-                                color: textColor
-                                Layout.alignment: Qt.AlignHCenter
-                            }
-                            
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                color: "white"
-                                radius: 6
-                                border.color: borderColor
-                                border.width: 1
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            color: "white"
+                            radius: 6
+                            border.color: borderColor
+                            border.width: 1
                                 
                                 Image {
                                     id: image2Display
@@ -267,17 +228,16 @@ ApplicationWindow {
                                     onClicked: fileDialog2.open()
                                 }
                             }
-                            
-                            Text {
-                                text: controller.image2Path ? 
-                                      controller.image2Path.split('/').pop() || controller.image2Path.split('\\').pop() : 
-                                      "未选择文件"
-                                font.pixelSize: 12
-                                color: "#666666"
-                                elide: Text.ElideMiddle
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter
-                            }
+                        
+                        Text {
+                            text: controller.image2Path ? 
+                                  controller.image2Path.split('/').pop() || controller.image2Path.split('\\').pop() : 
+                                  "未选择文件"
+                            font.pixelSize: 12
+                            color: "#666666"
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignHCenter
                         }
                     }
                 }
@@ -332,7 +292,6 @@ ApplicationWindow {
                 }
             }
         }
-    }
     
     // 文件选择对话框
     FileDialog {

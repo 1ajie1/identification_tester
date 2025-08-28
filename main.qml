@@ -15,7 +15,16 @@ QtObject {
                 x: 100,
                 y: 100
             })
-            controlWindow.show()
+            if (controlWindow) {
+                controlWindow.show()
+                console.log("控制窗口创建成功")
+            } else {
+                console.log("控制窗口创建失败")
+            }
+        } else if (controlComponent.status === Component.Error) {
+            console.log("控制窗口加载错误:", controlComponent.errorString())
+        } else {
+            console.log("控制窗口状态:", controlComponent.status)
         }
         
         // 创建显示窗口
@@ -25,7 +34,16 @@ QtObject {
                 x: 600,
                 y: 100
             })
-            displayWindow.show()
+            if (displayWindow) {
+                displayWindow.show()
+                console.log("显示窗口创建成功")
+            } else {
+                console.log("显示窗口创建失败")
+            }
+        } else if (displayComponent.status === Component.Error) {
+            console.log("显示窗口加载错误:", displayComponent.errorString())
+        } else {
+            console.log("显示窗口状态:", displayComponent.status)
         }
     }
 }

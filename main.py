@@ -1,8 +1,7 @@
 import sys
 import os
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QmlElement, qmlRegisterType, QQmlApplicationEngine
-from PySide6.QtQuick import QQuickView
+from PySide6.QtQml import QmlElement, QQmlApplicationEngine
 from PySide6.QtCore import QObject, Signal, Slot, Property, QUrl
 
 QML_IMPORT_NAME = "ImageMatcher"
