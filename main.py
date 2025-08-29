@@ -4,10 +4,6 @@ import os
 import json
 import numpy as np
 
-# 在导入任何使用pyautogui的模块之前，设置环境变量防止pyautogui自动设置DPI
-os.environ.setdefault("PYAUTOGUI_NO_FAILSAFE", "1")
-os.environ["PYAUTOGUI_DPI_AWARE"] = "0"
-# 输出当前dpi设置
 
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QmlElement, QQmlApplicationEngine

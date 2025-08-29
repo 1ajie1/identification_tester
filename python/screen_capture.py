@@ -13,9 +13,6 @@ import tempfile
 import os
 import platform
 
-# 在导入pyautogui之前设置环境变量，防止它自动设置DPI感知
-os.environ.setdefault("PYAUTOGUI_NO_FAILSAFE", "1")
-
 # 延迟导入pyautogui，并在导入时禁用DPI设置
 import pyautogui
 
