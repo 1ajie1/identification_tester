@@ -19,6 +19,24 @@ ApplicationWindow {
     property color textColor: "#333333"
     property color borderColor: "#E0E0E0"
 
+    // 颜色映射函数（保留作为备用）
+    function getClassColor(classId) {
+        // 这个函数现在主要作为备用，实际颜色由后端动态生成
+        const colors = [
+            "#FF0000",  // 红色 - class_0
+            "#00FF00",  // 绿色 - class_1
+            "#0000FF",  // 蓝色 - class_2
+            "#FFFF00",  // 黄色 - class_3
+            "#FF00FF",  // 洋红 - class_4
+            "#00FFFF",  // 青色 - class_5
+            "#FFA500",  // 橙色 - class_6
+            "#800080",  // 紫色 - class_7
+            "#FFC0CB",  // 粉色 - class_8
+            "#A52A2A"   // 棕色 - class_9
+        ];
+        return colors[classId % colors.length];
+    }
+
     // 主显示区域 - 只保留核心显示功能
 
     StackLayout {
@@ -254,18 +272,146 @@ ApplicationWindow {
                     border.width: 1
 
                     // 实时区域图像显示
-                    Image {
-                        id: screenAreaImage
+                    Item {
                         anchors.fill: parent
                         anchors.margins: 10
-                        source: controller.screenAreaImagePath ? "file:///" + controller.screenAreaImagePath : ""
-                        fillMode: Image.PreserveAspectFit
-                        visible: controller.screenAreaImagePath !== ""
-                        cache: false  // 禁用缓存以确保实时更新
+                        
+                        Item {
+                            anchors.fill: parent
+                            
+                            Image {
+                                id: screenAreaImage
+                                anchors.fill: parent
+                                source: controller.screenAreaImagePath ? "file:///" + controller.screenAreaImagePath : ""
+                                fillMode: Image.PreserveAspectFit  // 保持宽高比并适应容器
+                                visible: controller.screenAreaImagePath !== ""
+                                cache: false  // 禁用缓存以确保实时更新
+                                smooth: true  // 启用平滑缩放
+                                
+                                // 添加背景以便看清图片边界
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    border.color: "#E0E0E0"
+                                    border.width: 1
+                                    z: -1
+                                }
 
-                        onStatusChanged: {
-                            if (status === Image.Error) {
-                                console.log("加载屏幕区域图片失败: " + controller.screenAreaImagePath);
+                                // 添加鼠标区域以支持缩放查看
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    
+                                    onDoubleClicked: {
+                                        // 双击切换原始尺寸和适应尺寸
+                                        if (screenAreaImage.fillMode === Image.PreserveAspectFit) {
+                                            screenAreaImage.fillMode = Image.PreserveAspectCrop;
+                                            console.log("切换到裁剪模式");
+                                        } else {
+                                            screenAreaImage.fillMode = Image.PreserveAspectFit;
+                                            console.log("切换到适应模式");
+                                        }
+                                    }
+                                    
+                                    onClicked: function(mouse) {
+                                        if (mouse.button === Qt.RightButton) {
+                                            if (controller.screenAreaImagePath) {
+                                                Qt.openUrlExternally("file:///" + controller.screenAreaImagePath);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 检测结果绘制层
+                            Repeater {
+                                id: detectionResultsRepeater
+                                model: ListModel {
+                                    id: detectionResultsModel
+                                }
+                                
+                                delegate: Item {
+                                    id: detectionDelegate
+                                    
+                                    // 计算在图像上的实际位置和大小
+                                    property real imageDisplayWidth: screenAreaImage.paintedWidth
+                                    property real imageDisplayHeight: screenAreaImage.paintedHeight
+                                    property real imageDisplayX: screenAreaImage.x + (screenAreaImage.width - imageDisplayWidth) / 2
+                                    property real imageDisplayY: screenAreaImage.y + (screenAreaImage.height - imageDisplayHeight) / 2
+                                    
+                                    // 计算检测框的缩放比例和位置
+                                    property real scaleX: imageDisplayWidth / model.originalImageWidth
+                                    property real scaleY: imageDisplayHeight / model.originalImageHeight
+                                    
+                                    x: imageDisplayX + (model.relativeX * imageDisplayWidth)
+                                    y: imageDisplayY + (model.relativeY * imageDisplayHeight)
+                                    width: model.relativeWidth * imageDisplayWidth
+                                    height: model.relativeHeight * imageDisplayHeight
+                                    
+                                    visible: screenAreaImage.visible && imageDisplayWidth > 0 && imageDisplayHeight > 0
+                                    
+                                    // 检测框
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        color: "transparent"
+                                        border.color: model.borderColor || "#FF0000"
+                                        border.width: 2
+                                        radius: 0
+                                        
+                                        // 闪烁动画
+                                        SequentialAnimation on border.color {
+                                            running: parent.visible
+                                            loops: Animation.Infinite
+                                            ColorAnimation { 
+                                                to: model.borderColor || "#FF0000"
+                                                duration: 800
+                                            }
+                                            ColorAnimation { 
+                                                to: Qt.lighter(model.borderColor || "#FF0000", 1.5)
+                                                duration: 800
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 类别和置信度标签
+                                    Rectangle {
+                                        id: labelBackground
+                                        width: labelText.implicitWidth + 12
+                                        height: labelText.implicitHeight + 8
+                                        color: model.borderColor || "#FF0000"
+                                        radius: 3
+                                        
+                                        // 智能定位标签
+                                        x: 0
+                                        y: {
+                                            let labelHeight = height + 2;
+                                            if (parent.y >= labelHeight) {
+                                                return -labelHeight;  // 显示在框上方
+                                            } else {
+                                                return 2;  // 显示在框内上方
+                                            }
+                                        }
+
+                                        Text {
+                                            id: labelText
+                                            text: `${model.className || "object"}: ${(model.confidence * 100).toFixed(1)}%`
+                                            color: "white"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            anchors.centerIn: parent
+                                        }
+                                    }
+                                    
+                                    // 中心点标记
+                                    Rectangle {
+                                        width: 6
+                                        height: 6
+                                        color: model.borderColor || "#FF0000"
+                                        radius: 3
+                                        anchors.centerIn: parent
+                                        opacity: 0.8
+                                    }
+                                }
                             }
                         }
                     }
@@ -409,105 +555,99 @@ ApplicationWindow {
     // 添加日志输出功能
     property var logFunction: null
 
-    // 屏幕匹配结果覆盖层
-    property var screenMatchOverlay: null
-
-    // 多个检测结果覆盖层数组
-    property var multipleDetectionOverlays: []
-
     function addLog(message, type) {
         // 通过全局信号发送日志到控制窗口
         controller.addLog(message, type || "info");
     }
 
     function showScreenMatchOverlay(x, y, width, height, confidence, title) {
-        // 创建屏幕匹配结果覆盖层
-        if (screenMatchOverlay) {
-            screenMatchOverlay.closeWithAnimation();
-            screenMatchOverlay = null;
-        }
-
-        var component = Qt.createComponent("MatchResultOverlay.qml");
-        if (component.status === Component.Ready) {
-            screenMatchOverlay = component.createObject(null, {
-                "autoClose": true,
-                "autoCloseDelay": 10000  // 10秒后自动关闭
+        // 先清除所有现有的检测结果
+        clearDetectionResults();
+        
+        // 在显示窗口内显示单个匹配结果
+        if (controller.screenAreaImagePath && detectionResultsModel) {
+            // 获取原始图像尺寸（从控制器）
+            let originalWidth = controller.selectedWindowRect ? controller.selectedWindowRect.width : 1920;
+            let originalHeight = controller.selectedWindowRect ? controller.selectedWindowRect.height : 1080;
+            
+            detectionResultsModel.append({
+                "relativeX": x / originalWidth,
+                "relativeY": y / originalHeight,
+                "relativeWidth": width / originalWidth,
+                "relativeHeight": height / originalHeight,
+                "confidence": confidence,
+                "className": title || "匹配结果",
+                "borderColor": getClassColor(0),  // 单个匹配结果使用默认颜色
+                "originalImageWidth": originalWidth,
+                "originalImageHeight": originalHeight
             });
-
-            if (screenMatchOverlay) {
-                // 连接信号
-                screenMatchOverlay.overlayClicked.connect(function () {
-                    addLog("用户点击了匹配结果覆盖层", "info");
-                });
-
-                screenMatchOverlay.overlayClosed.connect(function () {
-                    screenMatchOverlay = null;
-                    addLog("匹配结果覆盖层已关闭", "info");
-                });
-
-                screenMatchOverlay.showMatchResult(x, y, width, height, confidence, title);
-                addLog(`显示屏幕匹配结果覆盖层: ${title}`, "success");
-            }
-        } else {
-            addLog("无法创建匹配结果覆盖层", "error");
+            
+            addLog(`显示匹配结果: ${title}`, "success");
         }
     }
 
     function showMultipleDetections(detectionsJson) {
-        // 清理之前的覆盖层
-        closeMultipleDetectionOverlays();
+        // 先清除所有现有的检测结果
+        clearDetectionResults();
 
         try {
             var detections = JSON.parse(detectionsJson);
-            addLog(`显示 ${detections.length} 个检测结果`, "success");
+            
+            // 实时检测时不显示日志消息，避免日志刷屏
+            if (!controller.realtimeDetectionActive) {
+                addLog(`显示 ${detections.length} 个检测结果`, "success");
+            }
 
-            var component = Qt.createComponent("MatchResultOverlay.qml");
-            if (component.status === Component.Ready) {
+            if (controller.screenAreaImagePath && detectionResultsModel) {
+                // 获取原始图像尺寸
+                let originalWidth = controller.selectedWindowRect ? controller.selectedWindowRect.width : 1920;
+                let originalHeight = controller.selectedWindowRect ? controller.selectedWindowRect.height : 1080;
+                
+                // 显示所有检测结果
                 for (var i = 0; i < detections.length; i++) {
                     var detection = detections[i];
-                    var overlay = component.createObject(null, {
-                        "autoClose": true,
-                        "autoCloseDelay": 15000  // 15秒后自动关闭
+                    var className = detection.class_name || "object";
+                    if (className.startsWith("class_")) {
+                        className = className.substring(6);
+                    }
+                    
+                    detectionResultsModel.append({
+                        "relativeX": detection.relative_x || 0,
+                        "relativeY": detection.relative_y || 0,
+                        "relativeWidth": detection.relative_width || 0.1,
+                        "relativeHeight": detection.relative_height || 0.1,
+                        "confidence": detection.confidence || 0,
+                        "className": className,
+                        "borderColor": detection.border_color || getClassColor(detection.class_id || 0),  // 优先使用后端动态颜色
+                        "originalImageWidth": originalWidth,
+                        "originalImageHeight": originalHeight
                     });
-
-                    if (overlay) {
-                        // 连接信号
-                        overlay.overlayClicked.connect(function () {
-                            addLog("用户点击了检测结果覆盖层", "info");
-                        });
-
-                        overlay.overlayClosed.connect(function () {
-                            // 从数组中移除已关闭的覆盖层
-                            for (var j = 0; j < multipleDetectionOverlays.length; j++) {
-                                if (multipleDetectionOverlays[j] === overlay) {
-                                    multipleDetectionOverlays.splice(j, 1);
-                                    break;
-                                }
-                            }
-                            addLog("检测结果覆盖层已关闭", "info");
-                        });
-
-                        var title = `${detection.class_name} (${(detection.confidence * 100).toFixed(1)}%)`;
-                        overlay.showMatchResult(detection.screen_x, detection.screen_y, detection.width, detection.height, detection.confidence, title);
-                        multipleDetectionOverlays.push(overlay);
+                    
+                    if (!controller.realtimeDetectionActive) {
+                        addLog(`显示检测结果 ${i+1}: ${className} (${(detection.confidence * 100).toFixed(1)}%)`, "success");
                     }
                 }
-            } else {
-                addLog("无法创建检测结果覆盖层", "error");
             }
         } catch (e) {
             addLog(`解析检测结果失败: ${e}`, "error");
         }
     }
 
-    function closeMultipleDetectionOverlays() {
-        // 关闭所有多个检测结果覆盖层
-        for (var i = 0; i < multipleDetectionOverlays.length; i++) {
-            if (multipleDetectionOverlays[i]) {
-                multipleDetectionOverlays[i].close();
-            }
+    function clearDetectionResults() {
+        // 清除显示窗口内的检测结果
+        if (detectionResultsModel) {
+            detectionResultsModel.clear();
         }
-        multipleDetectionOverlays = [];
+    }
+    
+    function closeMultipleDetectionOverlays() {
+        // 兼容性函数 - 现在使用显示窗口内绘制，所以直接清除结果
+        clearDetectionResults();
+    }
+    
+    function clearAllDetections() {
+        // 清理所有检测结果
+        clearDetectionResults();
     }
 
     // 监听控制器信号，更新显示
@@ -540,6 +680,10 @@ ApplicationWindow {
 
         function onShowMultipleDetections(detectionsJson) {
             showMultipleDetections(detectionsJson);
+        }
+        
+        function onClearAllDetections() {
+            clearAllDetections();
         }
 
         function onScreenAreaImageChanged(imagePath) {

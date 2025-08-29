@@ -222,6 +222,7 @@ ApplicationWindow {
         var width = Math.abs(areaEndPoint.x - areaStartPoint.x)
         var height = Math.abs(areaEndPoint.y - areaStartPoint.y)
         
+        // QML返回逻辑坐标，物理坐标转换由Python端处理
         // 保留一位小数
         x = Math.round(x * 10) / 10
         y = Math.round(y * 10) / 10

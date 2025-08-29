@@ -86,8 +86,6 @@ class YOLOORBMatchingEngine:
                 #     # 使用ONNX Runtime加载
                 #     pass
                 logger.warning(f"YOLO模型加载功能开发中: {model_path}")
-            else:
-                logger.info("YOLO模型初始化（模拟模式）")
 
             # 模拟一些常见的类别
             self.yolo_classes = [
@@ -177,6 +175,60 @@ class YOLOORBMatchingEngine:
 
         except Exception as e:
             logger.warning(f"YOLO初始化失败: {e}")
+
+    def get_model_info(self, model_path: str = ""):
+        """
+        获取模型信息，包括类别数量和类别名称
+
+        Args:
+            model_path: YOLO模型文件路径
+
+        Returns:
+            dict: 包含模型信息的字典，包括classes等
+        """
+        try:
+            if not model_path or not model_path.strip():
+                # 返回默认类别信息
+                classes_dict = {i: name for i, name in enumerate(self.yolo_classes)}
+                return {
+                    "classes": classes_dict,
+                    "num_classes": len(self.yolo_classes),
+                    "model_type": "default_yolo_orb"
+                }
+
+            # 尝试加载模型获取类别信息
+            if model_path.endswith('.pt'):
+                try:
+                    # 尝试使用ultralytics加载
+                    from ultralytics import YOLO
+                    model = YOLO(model_path)
+                    if hasattr(model, 'names') and model.names:
+                        return {
+                            "classes": model.names,
+                            "num_classes": len(model.names),
+                            "model_type": "ultralytics_yolo_orb"
+                        }
+                except ImportError:
+                    logger.warning("ultralytics库不可用，无法获取详细模型信息")
+                except Exception as e:
+                    logger.warning(f"加载PT模型信息失败: {e}")
+
+            # 默认返回内置类别
+            classes_dict = {i: name for i, name in enumerate(self.yolo_classes)}
+            return {
+                "classes": classes_dict,
+                "num_classes": len(self.yolo_classes),
+                "model_type": "builtin_yolo_orb"
+            }
+
+        except Exception as e:
+            logger.error(f"获取YOLO+ORB模型信息失败: {e}")
+            classes_dict = {i: f"class_{i}" for i in range(80)}
+            return {
+                "classes": classes_dict,
+                "num_classes": 80,
+                "model_type": "error_fallback_yolo_orb"
+            }
 
     def reload_model(self, model_path: str):
         """

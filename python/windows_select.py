@@ -15,6 +15,7 @@ import cv2
 from typing import List, Dict, Any, Optional, Tuple
 import logging
 import os
+import platform
 
 # 在导入pyautogui之前设置环境变量
 os.environ.setdefault("PYAUTOGUI_NO_FAILSAFE", "1")
@@ -63,9 +64,37 @@ class WindowInfo:
             return ""
 
     def _get_window_rect(self) -> Dict[str, int]:
-        """获取窗口矩形"""
+        """获取窗口矩形，考虑DPI缩放"""
         try:
-            left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+            # 首先尝试使用DPI感知的API
+            try:
+                # 尝试使用DwmGetWindowAttribute获取扩展框架边界
+                import ctypes
+                from ctypes import wintypes
+                
+                dwmapi = ctypes.windll.dwmapi
+                rect = wintypes.RECT()
+                
+                # DWMWA_EXTENDED_FRAME_BOUNDS = 9
+                result = dwmapi.DwmGetWindowAttribute(
+                    wintypes.HWND(self.hwnd),
+                    wintypes.DWORD(9),
+                    ctypes.byref(rect),
+                    ctypes.sizeof(rect)
+                )
+                
+                if result == 0:  # S_OK
+                    # DWM API成功，使用更精确的边界
+                    left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+                    logger.debug(f"使用DWM API获取窗口坐标: ({left}, {top}, {right}, {bottom})")
+                else:
+                    raise Exception("DWM API失败")
+                    
+            except Exception:
+                # 回退到标准API
+                left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+                logger.debug(f"使用标准API获取窗口坐标: ({left}, {top}, {right}, {bottom})")
+            
             return {
                 "x": left,
                 "y": top,
@@ -368,10 +397,37 @@ class WindowSelector:
             window = WindowInfo(hwnd)
             rect = window.rect
 
-            # 使用pyautogui截图
-            screenshot = pyautogui.screenshot(
-                region=(rect["x"], rect["y"], rect["width"], rect["height"])
-            )
+            # 尝试多种截图方法
+            screenshot = None
+            
+            # 方法1：尝试使用PrintWindow API（最适合DPI环境）
+            try:
+                screenshot = self._capture_window_with_printwindow(hwnd, rect)
+                if screenshot:
+                    logger.debug(f"PrintWindow API截图成功: {screenshot.size}")
+            except Exception as e:
+                logger.debug(f"PrintWindow API失败: {e}")
+            
+            # 方法2：如果PrintWindow失败，使用PIL ImageGrab
+            if screenshot is None:
+                try:
+                    from PIL import ImageGrab
+                    x, y, width, height = rect["x"], rect["y"], rect["width"], rect["height"]
+                    
+                    # 直接使用逻辑坐标进行截图，让PIL自己处理DPI
+                    screenshot = ImageGrab.grab(bbox=(x, y, x + width, y + height))
+                    logger.debug(f"PIL截图: ({x}, {y}, {width}, {height}) -> {screenshot.size}")
+                    
+                except ImportError:
+                    # 方法3：回退到pyautogui
+                    screenshot = pyautogui.screenshot(
+                        region=(rect["x"], rect["y"], rect["width"], rect["height"])
+                    )
+                    logger.debug(f"PyAutoGUI截图: {screenshot.size}")
+
+            if screenshot is None:
+                logger.error("所有截图方法都失败了")
+                return None
 
             # 转换为OpenCV格式
             screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
@@ -385,6 +441,106 @@ class WindowSelector:
 
         except Exception as e:
             logger.error(f"捕获窗口图像失败: {e}")
+            return None
+    
+    def _capture_window_with_printwindow(self, hwnd: int, rect: Dict[str, int]) -> Optional:
+        """
+        使用PrintWindow API捕获窗口
+        这个方法不受DPI缩放影响，能准确捕获窗口内容
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+            from PIL import Image
+            
+            # 获取窗口尺寸
+            width = rect["width"]
+            height = rect["height"]
+            
+            if width <= 0 or height <= 0:
+                return None
+            
+            # 创建设备上下文
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            
+            # 获取窗口DC
+            window_dc = user32.GetWindowDC(hwnd)
+            if not window_dc:
+                return None
+            
+            # 创建内存DC
+            mem_dc = gdi32.CreateCompatibleDC(window_dc)
+            if not mem_dc:
+                user32.ReleaseDC(hwnd, window_dc)
+                return None
+            
+            # 创建位图
+            bitmap = gdi32.CreateCompatibleBitmap(window_dc, width, height)
+            if not bitmap:
+                gdi32.DeleteDC(mem_dc)
+                user32.ReleaseDC(hwnd, window_dc)
+                return None
+            
+            # 选择位图到内存DC
+            old_bitmap = gdi32.SelectObject(mem_dc, bitmap)
+            
+            # 使用PrintWindow捕获窗口内容
+            # PW_CLIENTONLY = 0x1, PW_RENDERFULLCONTENT = 0x2
+            result = user32.PrintWindow(hwnd, mem_dc, 0x2)
+            
+            if result:
+                # 获取位图数据
+                bmp_info = wintypes.BITMAPINFO()
+                bmp_info.bmiHeader.biSize = ctypes.sizeof(bmp_info.bmiHeader)
+                bmp_info.bmiHeader.biWidth = width
+                bmp_info.bmiHeader.biHeight = -height  # 负值表示从上到下
+                bmp_info.bmiHeader.biPlanes = 1
+                bmp_info.bmiHeader.biBitCount = 32
+                bmp_info.bmiHeader.biCompression = 0  # BI_RGB
+                
+                # 创建缓冲区
+                buffer_size = width * height * 4
+                buffer = (ctypes.c_char * buffer_size)()
+                
+                # 获取位图数据
+                lines = gdi32.GetDIBits(
+                    mem_dc, bitmap, 0, height, buffer, 
+                    ctypes.byref(bmp_info), 0  # DIB_RGB_COLORS
+                )
+                
+                if lines == height:
+                    # 转换为PIL图像
+                    img_data = bytes(buffer)
+                    # Windows bitmap是BGRA格式，转换为RGBA
+                    import struct
+                    rgba_data = bytearray()
+                    for i in range(0, len(img_data), 4):
+                        b, g, r, a = struct.unpack_from('BBBB', img_data, i)
+                        rgba_data.extend([r, g, b, a])
+                    
+                    screenshot = Image.frombytes('RGBA', (width, height), bytes(rgba_data))
+                    # 转换为RGB
+                    screenshot = screenshot.convert('RGB')
+                    
+                    # 清理资源
+                    gdi32.SelectObject(mem_dc, old_bitmap)
+                    gdi32.DeleteObject(bitmap)
+                    gdi32.DeleteDC(mem_dc)
+                    user32.ReleaseDC(hwnd, window_dc)
+                    
+                    return screenshot
+            
+            # 清理资源
+            gdi32.SelectObject(mem_dc, old_bitmap)
+            gdi32.DeleteObject(bitmap)
+            gdi32.DeleteDC(mem_dc)
+            user32.ReleaseDC(hwnd, window_dc)
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"PrintWindow API执行失败: {e}")
             return None
 
 

@@ -3,6 +3,7 @@ import sys
 import os
 import json
 import numpy as np
+import logging
 
 
 from PySide6.QtGui import QGuiApplication
@@ -17,6 +18,9 @@ from python.yolo_orb_matching import yolo_orb_matcher
 from python.yolo_matching_pure import pure_yolo_matcher
 
 QML_IMPORT_NAME = "ImageMatcher"
+
+# 配置日志
+logger = logging.getLogger(__name__)
 QML_IMPORT_MAJOR_VERSION = 1
 
 
@@ -37,6 +41,8 @@ class ImageMatcherController(QObject):
         int, int, int, int, float, str
     )  # 显示屏幕匹配覆盖层 (x, y, width, height, confidence, title)
     showMultipleDetections = Signal(str)  # 显示多个检测结果 (detections_json)
+    realtimeDetectionStateChanged = Signal(bool)  # 实时检测状态变化 (active)
+    clearAllDetections = Signal()  # 清除所有检测结果
 
     def __init__(self):
         super().__init__()
@@ -48,6 +54,15 @@ class ImageMatcherController(QObject):
         self._selected_window_rect = {"x": 0, "y": 0, "width": 0, "height": 0}
         self._screen_area_image_path = ""  # 屏幕区域截图路径
         self._area_capture_timer = None  # 区域截取定时器
+        
+        # 实时检测相关
+        self._realtime_detection_active = False
+        self._realtime_timer = None
+        self._realtime_interval = 500  # 毫秒，检测间隔
+        
+        # 动态颜色映射
+        self._class_colors = {}  # 类别ID到颜色的映射
+        self._model_classes = {}  # 模型类别信息
 
         # 算法配置参数
         self._algorithm_settings = {
@@ -116,6 +131,10 @@ class ImageMatcherController(QObject):
     @Property(str, notify=windowSelected)
     def selectedWindow(self):
         return self._selected_window
+
+    @Property('QVariant', notify=windowSelected)
+    def selectedWindowRect(self):
+        return self._selected_window_rect
 
     @Property(str, notify=screenAreaImageChanged)
     def screenAreaImagePath(self):
@@ -241,8 +260,11 @@ class ImageMatcherController(QObject):
         try:
             import os
             import tempfile
-            import pyautogui
+            import cv2
+            import logging
             from datetime import datetime
+            
+            logger = logging.getLogger(__name__)
 
             if (
                 self._selected_window_rect["width"] <= 0
@@ -250,15 +272,27 @@ class ImageMatcherController(QObject):
             ):
                 return
 
-            # 截取指定区域
-            screenshot = pyautogui.screenshot(
-                region=(
-                    int(self._selected_window_rect["x"]),
-                    int(self._selected_window_rect["y"]),
-                    int(self._selected_window_rect["width"]),
-                    int(self._selected_window_rect["height"]),
-                )
-            )
+            # 获取QML传递的逻辑坐标
+            logical_x = self._selected_window_rect["x"]
+            logical_y = self._selected_window_rect["y"]
+            logical_width = self._selected_window_rect["width"]
+            logical_height = self._selected_window_rect["height"]
+            
+            # 将逻辑坐标转换为物理坐标
+            # QML返回的是逻辑坐标，需要乘以DPI缩放因子得到物理像素坐标
+            physical_x = int(logical_x * screen_capture.dpi_scale)
+            physical_y = int(logical_y * screen_capture.dpi_scale)
+            physical_width = int(logical_width * screen_capture.dpi_scale)
+            physical_height = int(logical_height * screen_capture.dpi_scale)
+            
+            region = (physical_x, physical_y, physical_width, physical_height)
+          
+            # 使用我们修复的截图功能
+            screenshot_cv = screen_capture.capture_screen(region)
+            
+            if screenshot_cv is None:
+                print("屏幕区域截图失败")
+                return
 
             # 保存到临时文件
             temp_dir = tempfile.gettempdir()
@@ -266,8 +300,12 @@ class ImageMatcherController(QObject):
             filename = f"screen_area_{timestamp}.png"
             filepath = os.path.join(temp_dir, filename)
 
-            screenshot.save(filepath)
-
+            # 使用OpenCV保存图像
+            success = cv2.imwrite(filepath, screenshot_cv)
+            if not success:
+                print(f"保存截图失败: {filepath}")
+                return
+            
             # 清理旧文件（保留最近5个）
             self._cleanupOldScreenshots(temp_dir)
 
@@ -312,6 +350,9 @@ class ImageMatcherController(QObject):
     @Slot()
     def startMatching(self):
         """开始匹配"""
+        # 清除之前的检测结果
+        self.clearAllDetections.emit()
+        
         algorithm_names = [
             "模板匹配",
             "OpenCV ORB特征匹配",
@@ -604,11 +645,20 @@ class ImageMatcherController(QObject):
 
                 if result["center_point"]:
                     center = result["center_point"]
-                    # 调整坐标到屏幕坐标
-                    screen_x = center["x"] + self._selected_window_rect["x"]
-                    screen_y = center["y"] + self._selected_window_rect["y"]
+                    # 物理坐标转换为逻辑坐标，再调整到屏幕坐标
+                    logical_x = center["x"] / screen_capture.dpi_scale
+                    logical_y = center["y"] / screen_capture.dpi_scale
+                    screen_x = logical_x + self._selected_window_rect["x"]
+                    screen_y = logical_y + self._selected_window_rect["y"]
+                    
+                    logger.info(f"ORB匹配坐标转换:")
+                    logger.info(f"  物理坐标: ({center['x']}, {center['y']})")
+                    logger.info(f"  逻辑坐标: ({logical_x:.1f}, {logical_y:.1f})")
+                    logger.info(f"  屏幕坐标: ({screen_x:.1f}, {screen_y:.1f})")
+                    logger.info(f"  DPI缩放: {screen_capture.dpi_scale}")
+                    
                     self.logAdded.emit(
-                        f"  • 屏幕坐标: ({screen_x}, {screen_y})", "success"
+                        f"  • 屏幕坐标: ({screen_x:.1f}, {screen_y:.1f})", "success"
                     )
 
                 if result["bounding_box"]:
@@ -623,13 +673,20 @@ class ImageMatcherController(QObject):
                 # 显示屏幕覆盖层
                 if result["bounding_box"]:
                     bbox = result["bounding_box"]
-                    screen_x = bbox["left"] + self._selected_window_rect["x"]
-                    screen_y = bbox["top"] + self._selected_window_rect["y"]
+                    # 物理坐标转换为逻辑坐标
+                    logical_left = bbox["left"] / screen_capture.dpi_scale
+                    logical_top = bbox["top"] / screen_capture.dpi_scale
+                    logical_width = bbox["width"] / screen_capture.dpi_scale
+                    logical_height = bbox["height"] / screen_capture.dpi_scale
+                    
+                    screen_x = logical_left + self._selected_window_rect["x"]
+                    screen_y = logical_top + self._selected_window_rect["y"]
+                    
                     self.showScreenMatchOverlay.emit(
                         screen_x,
                         screen_y,
-                        bbox["width"],
-                        bbox["height"],
+                        logical_width,
+                        logical_height,
                         result["confidence"],
                         "ORB特征匹配",
                     )
@@ -712,11 +769,20 @@ class ImageMatcherController(QObject):
 
                 if result.get("center_point"):
                     center = result["center_point"]
-                    # 调整坐标到屏幕坐标
-                    screen_x = center["x"] + self._selected_window_rect["x"]
-                    screen_y = center["y"] + self._selected_window_rect["y"]
+                    # 物理坐标转换为逻辑坐标，再调整到屏幕坐标
+                    logical_x = center["x"] / screen_capture.dpi_scale
+                    logical_y = center["y"] / screen_capture.dpi_scale
+                    screen_x = logical_x + self._selected_window_rect["x"]
+                    screen_y = logical_y + self._selected_window_rect["y"]
+                    
+                    logger.info(f"YOLO+ORB匹配坐标转换:")
+                    logger.info(f"  物理坐标: ({center['x']}, {center['y']})")
+                    logger.info(f"  逻辑坐标: ({logical_x:.1f}, {logical_y:.1f})")
+                    logger.info(f"  屏幕坐标: ({screen_x:.1f}, {screen_y:.1f})")
+                    logger.info(f"  DPI缩放: {screen_capture.dpi_scale}")
+                    
                     self.logAdded.emit(
-                        f"  • 屏幕坐标: ({screen_x}, {screen_y})", "success"
+                        f"  • 屏幕坐标: ({screen_x:.1f}, {screen_y:.1f})", "success"
                     )
 
                 if result.get("bounding_box"):
@@ -731,13 +797,20 @@ class ImageMatcherController(QObject):
                 # 显示屏幕覆盖层
                 if result.get("bounding_box"):
                     bbox = result["bounding_box"]
-                    screen_x = bbox["left"] + self._selected_window_rect["x"]
-                    screen_y = bbox["top"] + self._selected_window_rect["y"]
+                    # 物理坐标转换为逻辑坐标
+                    logical_left = bbox["left"] / screen_capture.dpi_scale
+                    logical_top = bbox["top"] / screen_capture.dpi_scale
+                    logical_width = bbox["width"] / screen_capture.dpi_scale
+                    logical_height = bbox["height"] / screen_capture.dpi_scale
+                    
+                    screen_x = logical_left + self._selected_window_rect["x"]
+                    screen_y = logical_top + self._selected_window_rect["y"]
+                    
                     self.showScreenMatchOverlay.emit(
                         screen_x,
                         screen_y,
-                        bbox["width"],
-                        bbox["height"],
+                        logical_width,
+                        logical_height,
                         result["confidence"],
                         method,
                     )
@@ -863,16 +936,44 @@ class ImageMatcherController(QObject):
 
                 # 发送多个检测结果到前端显示
                 if all_detections:
-                    # 转换坐标到屏幕坐标系
+                    # 转换坐标到屏幕坐标系和相对坐标
                     screen_detections = []
+                    
+                    # 获取区域尺寸
+                    area_width = self._selected_window_rect["width"]
+                    area_height = self._selected_window_rect["height"]
+                    
                     for detection in all_detections:
                         screen_detection = detection.copy()
+                        
+                        # YOLO检测返回的是物理像素坐标，需要转换为逻辑坐标再加上偏移
+                        # 物理坐标 -> 逻辑坐标
+                        logical_x = detection["x"] / screen_capture.dpi_scale
+                        logical_y = detection["y"] / screen_capture.dpi_scale
+                        logical_width = detection["width"] / screen_capture.dpi_scale
+                        logical_height = detection["height"] / screen_capture.dpi_scale
+                        
+                        # 逻辑坐标 + 逻辑偏移 = 屏幕逻辑坐标
                         screen_detection["screen_x"] = (
-                            self._selected_window_rect["x"] + detection["x"]
+                            self._selected_window_rect["x"] + logical_x
                         )
                         screen_detection["screen_y"] = (
-                            self._selected_window_rect["y"] + detection["y"]
+                            self._selected_window_rect["y"] + logical_y
                         )
+                        # 更新尺寸为逻辑坐标
+                        screen_detection["width"] = logical_width
+                        screen_detection["height"] = logical_height
+                        
+                        # 计算相对坐标（0-1范围）
+                        screen_detection["relative_x"] = logical_x / area_width
+                        screen_detection["relative_y"] = logical_y / area_height
+                        screen_detection["relative_width"] = logical_width / area_width
+                        screen_detection["relative_height"] = logical_height / area_height
+                        
+                        # 添加动态颜色信息
+                        class_id = detection.get("class_id", 0)
+                        screen_detection["border_color"] = self._get_class_color(class_id)
+                        
                         screen_detections.append(screen_detection)
 
                     # 发送检测结果到前端
@@ -880,14 +981,26 @@ class ImageMatcherController(QObject):
                     self.showMultipleDetections.emit(detections_json)
                 else:
                     # 显示单个屏幕匹配覆盖层（向后兼容）
-                    screen_x = self._selected_window_rect["x"] + x
-                    screen_y = self._selected_window_rect["y"] + y
+                    # 物理坐标转换为逻辑坐标
+                    logical_x = x / screen_capture.dpi_scale
+                    logical_y = y / screen_capture.dpi_scale
+                    logical_w = w / screen_capture.dpi_scale
+                    logical_h = h / screen_capture.dpi_scale
+                    
+                    # 逻辑坐标 + 逻辑偏移 = 屏幕逻辑坐标
+                    screen_x = self._selected_window_rect["x"] + logical_x
+                    screen_y = self._selected_window_rect["y"] + logical_y
+
+                    logger.info(f"单个YOLO检测坐标转换:")
+                    logger.info(f"  物理坐标: ({x}, {y}, {w}, {h})")
+                    logger.info(f"  逻辑坐标: ({logical_x:.1f}, {logical_y:.1f}, {logical_w:.1f}, {logical_h:.1f})")
+                    logger.info(f"  屏幕坐标: ({screen_x:.1f}, {screen_y:.1f})")
 
                     self.showScreenMatchOverlay.emit(
                         screen_x,
                         screen_y,
-                        w,
-                        h,
+                        logical_w,
+                        logical_h,
                         confidence,
                         "纯YOLO匹配",
                     )
@@ -1071,11 +1184,12 @@ class ImageMatcherController(QObject):
         try:
             import cv2
             import tempfile
-            import pyautogui
 
-            # 截取屏幕
-            screenshot = pyautogui.screenshot()
-            screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+            # 使用修复的截图功能截取全屏
+            screenshot_cv = screen_capture.capture_screen()
+            if screenshot_cv is None:
+                self.logAdded.emit("全屏截图失败", "error")
+                return
 
             # 绘制红色矩形框
             top_left = (match_result["left"], match_result["top"])
@@ -1287,6 +1401,11 @@ class ImageMatcherController(QObject):
             settings = json.loads(settings_json)
             if algorithm_index in self._algorithm_settings:
                 self._algorithm_settings[algorithm_index].update(settings)
+                
+                # 如果更新了模型路径，需要更新类别颜色映射
+                if "model_path" in settings and settings["model_path"]:
+                    self._update_model_classes(settings["model_path"])
+                
                 print(f"算法 {algorithm_index} 参数已更新: {settings}")
                 self.logAdded.emit(f"算法参数配置已保存", "success")
             else:
@@ -1309,6 +1428,259 @@ class ImageMatcherController(QObject):
     def getCurrentAlgorithmSettings(self):
         """获取当前算法的参数设置"""
         return self._algorithm_settings.get(self._algorithm_mode, {})
+    
+    def _generate_class_colors(self, num_classes):
+        """
+        动态生成类别颜色映射
+        
+        Args:
+            num_classes: 类别数量
+            
+        Returns:
+            dict: 类别ID到颜色的映射
+        """
+        import colorsys
+        
+        colors = {}
+        
+        # 为每个类别生成不同的颜色
+        for i in range(num_classes):
+            # 使用HSV色彩空间生成均匀分布的颜色
+            hue = i / num_classes  # 色相均匀分布
+            saturation = 0.8  # 饱和度
+            value = 0.9  # 明度
+            
+            # 转换为RGB
+            rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+            
+            # 转换为16进制颜色字符串
+            hex_color = "#{:02x}{:02x}{:02x}".format(
+                int(rgb[0] * 255),
+                int(rgb[1] * 255),
+                int(rgb[2] * 255)
+            )
+            
+            colors[i] = hex_color
+            
+        logger.info(f"为 {num_classes} 个类别生成颜色映射: {colors}")
+        return colors
+    
+    def _update_model_classes(self, model_path):
+        """
+        更新模型类别信息和颜色映射
+        
+        Args:
+            model_path: 模型文件路径
+        """
+        try:
+            # 尝试从YOLO匹配器获取类别信息
+            if self._algorithm_mode == 3:  # 纯YOLO
+                model_info = pure_yolo_matcher.get_model_info(model_path)
+                if model_info:
+                    self._model_classes = model_info.get("classes", {})
+                    num_classes = len(self._model_classes) if self._model_classes else 80  # COCO默认80类
+                    
+                    # 生成颜色映射
+                    self._class_colors = self._generate_class_colors(num_classes)
+                    
+                    self.logAdded.emit(f"加载模型类别信息: {num_classes} 个类别", "success")
+                else:
+                    # 使用默认设置
+                    self._model_classes = {}
+                    self._class_colors = self._generate_class_colors(80)  # COCO默认
+                    self.logAdded.emit("使用默认类别设置 (80类)", "info")
+            elif self._algorithm_mode == 2:  # YOLO+ORB
+                model_info = yolo_orb_matcher.get_model_info(model_path)
+                if model_info:
+                    self._model_classes = model_info.get("classes", {})
+                    num_classes = len(self._model_classes) if self._model_classes else 80
+                    self._class_colors = self._generate_class_colors(num_classes)
+                    self.logAdded.emit(f"加载YOLO+ORB模型类别信息: {num_classes} 个类别", "success")
+                else:
+                    self._model_classes = {}
+                    self._class_colors = self._generate_class_colors(80)
+                    self.logAdded.emit("使用默认YOLO+ORB类别设置 (80类)", "info")
+                    
+        except Exception as e:
+            logger.error(f"更新模型类别信息失败: {e}")
+            # 使用默认设置
+            self._model_classes = {}
+            self._class_colors = self._generate_class_colors(80)
+            self.logAdded.emit("使用默认类别设置", "warning")
+    
+    def _get_class_color(self, class_id):
+        """
+        获取类别对应的颜色
+        
+        Args:
+            class_id: 类别ID
+            
+        Returns:
+            str: 16进制颜色字符串
+        """
+        if class_id in self._class_colors:
+            return self._class_colors[class_id]
+        else:
+            # 如果没有预定义颜色，动态生成一个
+            import colorsys
+            hue = (class_id * 137.508) % 360 / 360  # 使用黄金角分割产生均匀分布
+            saturation = 0.8
+            value = 0.9
+            rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+            hex_color = "#{:02x}{:02x}{:02x}".format(
+                int(rgb[0] * 255),
+                int(rgb[1] * 255),
+                int(rgb[2] * 255)
+            )
+            # 缓存这个颜色
+            self._class_colors[class_id] = hex_color
+            return hex_color
+
+    @Slot()
+    def startRealtimeDetection(self):
+        """开始实时检测"""
+        if self._realtime_detection_active:
+            return
+            
+        # 清除之前的检测结果
+        self.clearAllDetections.emit()
+        
+        # 检查是否有选择的区域
+        if (not self._selected_window_rect or 
+            self._selected_window_rect.get("width", 0) <= 0 or 
+            self._selected_window_rect.get("height", 0) <= 0):
+            self.logAdded.emit("请先选择检测区域", "error")
+            return
+            
+        # 只有纯YOLO模式支持实时检测
+        if self._algorithm_mode != 3:
+            self.logAdded.emit("实时检测仅支持纯YOLO模式", "warning")
+            return
+            
+        self._realtime_detection_active = True
+        self._setupRealtimeTimer()
+        self.realtimeDetectionStateChanged.emit(True)
+        self.logAdded.emit("开始实时YOLO检测", "success")
+
+    @Slot()
+    def stopRealtimeDetection(self):
+        """停止实时检测"""
+        if not self._realtime_detection_active:
+            return
+            
+        self._realtime_detection_active = False
+        if self._realtime_timer:
+            self._realtime_timer.stop()
+            self._realtime_timer = None
+        
+        # 清除所有检测结果
+        self.clearAllDetections.emit()
+        self.realtimeDetectionStateChanged.emit(False)
+        self.logAdded.emit("停止实时检测", "info")
+
+    @Slot(int)
+    def setRealtimeInterval(self, interval_ms):
+        """设置实时检测间隔（毫秒）"""
+        self._realtime_interval = max(100, min(5000, interval_ms))  # 限制在100ms-5s之间
+        if self._realtime_timer and self._realtime_detection_active:
+            self._realtime_timer.setInterval(self._realtime_interval)
+
+    @Property(bool, notify=realtimeDetectionStateChanged)
+    def realtimeDetectionActive(self):
+        """实时检测状态属性"""
+        return self._realtime_detection_active
+
+    def _setupRealtimeTimer(self):
+        """设置实时检测定时器"""
+        from PySide6.QtCore import QTimer
+        
+        if self._realtime_timer:
+            self._realtime_timer.stop()
+            
+        self._realtime_timer = QTimer()
+        self._realtime_timer.timeout.connect(self._performRealtimeDetection)
+        self._realtime_timer.setInterval(self._realtime_interval)
+        self._realtime_timer.start()
+
+    def _performRealtimeDetection(self):
+        """执行一次实时检测"""
+        if not self._realtime_detection_active:
+            return
+            
+        try:
+            # 获取当前算法配置
+            config = self._algorithm_settings.get(self._algorithm_mode, {})
+            
+            # 获取QML传递的逻辑坐标
+            logical_x = self._selected_window_rect["x"]
+            logical_y = self._selected_window_rect["y"]
+            logical_width = self._selected_window_rect["width"]
+            logical_height = self._selected_window_rect["height"]
+            
+            # 将逻辑坐标转换为物理坐标
+            physical_x = int(logical_x * screen_capture.dpi_scale)
+            physical_y = int(logical_y * screen_capture.dpi_scale)
+            physical_width = int(logical_width * screen_capture.dpi_scale)
+            physical_height = int(logical_height * screen_capture.dpi_scale)
+            
+            region = (physical_x, physical_y, physical_width, physical_height)
+            
+            # 截取屏幕区域
+            screenshot_cv = screen_capture.capture_screen(region)
+            
+            if screenshot_cv is None:
+                return
+                
+            # 执行YOLO检测
+            result = pure_yolo_matcher.match_with_pure_yolo(None, screenshot_cv, config)
+            
+            if result and result.get("all_detections"):
+                # 转换检测结果坐标
+                all_detections = result["all_detections"]
+                screen_detections = []
+                
+                # 获取区域尺寸
+                area_width = self._selected_window_rect["width"]
+                area_height = self._selected_window_rect["height"]
+                
+                for detection in all_detections:
+                    screen_detection = detection.copy()
+                    
+                    # 物理坐标转换为逻辑坐标
+                    logical_det_x = detection["x"] / screen_capture.dpi_scale
+                    logical_det_y = detection["y"] / screen_capture.dpi_scale
+                    logical_det_width = detection["width"] / screen_capture.dpi_scale
+                    logical_det_height = detection["height"] / screen_capture.dpi_scale
+                    
+                    # 逻辑坐标 + 逻辑偏移 = 屏幕逻辑坐标
+                    screen_detection["screen_x"] = logical_x + logical_det_x
+                    screen_detection["screen_y"] = logical_y + logical_det_y
+                    screen_detection["width"] = logical_det_width
+                    screen_detection["height"] = logical_det_height
+                    
+                    # 计算相对坐标（0-1范围）
+                    screen_detection["relative_x"] = logical_det_x / area_width
+                    screen_detection["relative_y"] = logical_det_y / area_height
+                    screen_detection["relative_width"] = logical_det_width / area_width
+                    screen_detection["relative_height"] = logical_det_height / area_height
+                    
+                    # 添加动态颜色信息
+                    class_id = detection.get("class_id", 0)
+                    screen_detection["border_color"] = self._get_class_color(class_id)
+                    
+                    screen_detections.append(screen_detection)
+                
+                # 发送检测结果到前端（实时更新）
+                detections_json = json.dumps(screen_detections)
+                self.showMultipleDetections.emit(detections_json)
+            else:
+                # 没有检测到目标，清除显示
+                self.clearAllDetections.emit()
+                
+        except Exception as e:
+            logger.error(f"实时检测错误: {e}")
+            # 发生错误时停止实时检测
+            self.stopRealtimeDetection()
 
     @Slot(str, result=str)
     def executeTemplateMatching(self, template_path):
@@ -1456,9 +1828,20 @@ if __name__ == "__main__":
             print(f"DPI设置警告（可忽略）: {e}")
 
     # 3. 设置Qt高DPI缩放策略
+    # 使用PassThrough策略确保精确的DPI处理
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
+    
+    # 4. 配置pyautogui以适应高DPI环境
+    try:
+        import pyautogui
+        # 禁用pyautogui的fail-safe功能
+        pyautogui.FAILSAFE = False
+        # 设置pyautogui的图像搜索置信度
+        pyautogui.MINIMUM_DURATION = 0.1
+    except ImportError:
+        pass
 
     app = ImageMatcherApp()
     sys.exit(app.run())

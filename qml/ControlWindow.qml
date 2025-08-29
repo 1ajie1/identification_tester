@@ -183,6 +183,82 @@ ApplicationWindow {
             }
         }
 
+        // 实时检测按钮
+        Button {
+            Layout.fillWidth: true
+            height: 50
+            text: controller.realtimeDetectionActive ? "⏹ 停止实时检测" : "▶ 开始实时检测"
+            font.pixelSize: 14
+            font.bold: true
+            Layout.topMargin: 5
+
+            // 只有在屏幕窗口模式且为纯YOLO算法时才启用
+            enabled: controller.currentMode === 1 && controller.algorithmMode === 3 && controller.selectedWindow
+
+            onClicked: {
+                if (controller.realtimeDetectionActive) {
+                    controller.stopRealtimeDetection();
+                } else {
+                    controller.startRealtimeDetection();
+                }
+            }
+
+            background: Rectangle {
+                color: {
+                    if (!parent.enabled) return "#CCCCCC";
+                    if (controller.realtimeDetectionActive) {
+                        return parent.pressed ? "#D32F2F" : "#F44336";
+                    } else {
+                        return parent.pressed ? "#388E3C" : "#4CAF50";
+                    }
+                }
+                radius: 6
+                border.color: parent.enabled ? Qt.darker(color, 1.1) : "#BBBBBB"
+                border.width: 1
+            }
+
+            contentItem: Text {
+                text: parent.text
+                font: parent.font
+                color: parent.enabled ? "white" : "#666666"
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+
+        // 实时检测间隔设置
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 5
+            visible: controller.currentMode === 1 && controller.algorithmMode === 3
+
+            Label {
+                text: "检测间隔:"
+                font.pixelSize: 12
+                color: textColor
+            }
+            
+            Slider {
+                id: intervalSlider
+                Layout.fillWidth: true
+                from: 100
+                to: 2000
+                value: 500
+                stepSize: 100
+                
+                onValueChanged: {
+                    controller.setRealtimeInterval(value);
+                }
+            }
+            
+            Label {
+                text: Math.round(intervalSlider.value) + "ms"
+                font.pixelSize: 12
+                color: textColor
+                Layout.preferredWidth: 60
+            }
+        }
+
         // 操作日志标题栏
         // RowLayout {
         //     Layout.fillWidth: true

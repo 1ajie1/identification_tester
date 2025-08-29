@@ -50,105 +50,6 @@ class PureYOLOMatchingEngine:
             if model_path and model_path.strip():
                 # 加载真实的YOLO模型
                 logger.info(f"尝试加载YOLO模型: {model_path}")
-                # 这里应该根据模型文件格式加载模型
-                # 示例：
-                # if model_path.endswith('.weights'):
-                #     self.yolo_net = cv2.dnn.readNet(model_path, config_path)
-                # elif model_path.endswith('.pt'):
-                #     # 使用torch加载PyTorch模型
-                #     pass
-                # elif model_path.endswith('.onnx'):
-                #     # 使用ONNX Runtime加载
-                #     pass
-                logger.warning(f"YOLO模型加载功能开发中: {model_path}")
-            else:
-                logger.info("YOLO模型初始化（模拟模式）")
-
-            # 模拟一些常见的类别
-            self.yolo_classes = [
-                "person",
-                "bicycle",
-                "car",
-                "motorbike",
-                "aeroplane",
-                "bus",
-                "train",
-                "truck",
-                "boat",
-                "traffic light",
-                "fire hydrant",
-                "stop sign",
-                "parking meter",
-                "bench",
-                "bird",
-                "cat",
-                "dog",
-                "horse",
-                "sheep",
-                "cow",
-                "elephant",
-                "bear",
-                "zebra",
-                "giraffe",
-                "backpack",
-                "umbrella",
-                "handbag",
-                "tie",
-                "suitcase",
-                "frisbee",
-                "skis",
-                "snowboard",
-                "sports ball",
-                "kite",
-                "baseball bat",
-                "baseball glove",
-                "skateboard",
-                "surfboard",
-                "tennis racket",
-                "bottle",
-                "wine glass",
-                "cup",
-                "fork",
-                "knife",
-                "spoon",
-                "bowl",
-                "banana",
-                "apple",
-                "sandwich",
-                "orange",
-                "broccoli",
-                "carrot",
-                "hot dog",
-                "pizza",
-                "donut",
-                "cake",
-                "chair",
-                "sofa",
-                "pottedplant",
-                "bed",
-                "diningtable",
-                "toilet",
-                "tvmonitor",
-                "laptop",
-                "mouse",
-                "remote",
-                "keyboard",
-                "cell phone",
-                "microwave",
-                "oven",
-                "toaster",
-                "sink",
-                "refrigerator",
-                "book",
-                "clock",
-                "vase",
-                "scissors",
-                "teddy bear",
-                "hair drier",
-                "toothbrush",
-            ]
-
-            logger.info(f"YOLO类别数量: {len(self.yolo_classes)}")
 
         except Exception as e:
             logger.warning(f"YOLO初始化失败: {e}")
@@ -167,6 +68,69 @@ class PureYOLOMatchingEngine:
         except Exception as e:
             logger.error(f"重新加载YOLO模型失败: {e}")
             return False
+
+    def get_model_info(self, model_path: str = ""):
+        """
+        获取模型信息，包括类别数量和类别名称
+
+        Args:
+            model_path: YOLO模型文件路径
+
+        Returns:
+            dict: 包含模型信息的字典，包括classes等
+        """
+        try:
+            if not model_path or not model_path.strip():
+                # 返回COCO数据集的默认类别信息
+                return {
+                    "classes": {i: f"class_{i}" for i in range(80)},
+                    "num_classes": 80,
+                    "model_type": "default_coco"
+                }
+
+            # 尝试加载模型获取类别信息
+            if model_path.endswith('.pt'):
+                try:
+                    # 尝试使用ultralytics加载
+                    from ultralytics import YOLO
+                    model = YOLO(model_path)
+                    if hasattr(model, 'names') and model.names:
+                        return {
+                            "classes": model.names,
+                            "num_classes": len(model.names),
+                            "model_type": "ultralytics_pt"
+                        }
+                except ImportError:
+                    logger.warning("ultralytics库不可用，无法获取详细模型信息")
+                except Exception as e:
+                    logger.warning(f"加载PT模型信息失败: {e}")
+
+            elif model_path.endswith('.onnx'):
+                try:
+                    # 对于ONNX模型，尝试从文件名或其他方式推断
+                    # 这里可以根据实际需要扩展
+                    return {
+                        "classes": {i: f"class_{i}" for i in range(80)},
+                        "num_classes": 80,
+                        "model_type": "onnx_inferred"
+                    }
+                except Exception as e:
+                    logger.warning(f"获取ONNX模型信息失败: {e}")
+
+            # 默认返回COCO类别
+            return {
+                "classes": {i: f"class_{i}" for i in range(80)},
+                "num_classes": 80,
+                "model_type": "default_fallback"
+            }
+
+        except Exception as e:
+            logger.error(f"获取模型信息失败: {e}")
+            return {
+                "classes": {i: f"class_{i}" for i in range(80)},
+                "num_classes": 80,
+                "model_type": "error_fallback"
+            }
 
     def detect_objects_yolo(
         self, image: np.ndarray, config: Dict[str, Any] = None

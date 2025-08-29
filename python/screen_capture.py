@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 屏幕窗口捕获模块
-提供屏幕截图、窗口捕获和窗口检测功能
+使用mss + ctypes实现高效的屏幕截图，正确处理DPI缩放
 """
 
 import cv2
@@ -12,13 +12,8 @@ import logging
 import tempfile
 import os
 import platform
-
-# 延迟导入pyautogui，并在导入时禁用DPI设置
-import pyautogui
-
-
-# 禁用pyautogui的fail-safe功能
-pyautogui.FAILSAFE = False
+import ctypes
+from ctypes import wintypes
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -28,48 +23,152 @@ logger = logging.getLogger(__name__)
 class ScreenCaptureEngine:
     """
     屏幕捕获引擎
-    支持全屏截图、窗口截图和窗口检测
+    使用mss + ctypes实现高效截图，正确处理DPI缩放
     """
 
     def __init__(self):
-        # 默认配置
-        self.default_config = {
-            "screenshot_delay": 0.1,  # 截图延迟
-            "window_detection_method": "pyautogui",  # 窗口检测方法
-            "save_screenshots": True,  # 是否保存截图
-            "screenshot_format": "png",  # 截图格式
-        }
-
-        # 获取DPI缩放因子
+        # 初始化mss
+        try:
+            import mss
+            self.mss = mss.mss()
+            logger.info("MSS截图引擎初始化成功")
+        except ImportError:
+            logger.error("MSS库未安装，请运行: pip install mss")
+            self.mss = None
+        
+        # 获取DPI缩放信息
         self.dpi_scale = self._get_dpi_scale()
-        logger.info(f"检测到DPI缩放因子: {self.dpi_scale}")
+        self.screen_info = self._get_screen_info()
+        
+        logger.info(f"DPI缩放因子: {self.dpi_scale}")
+        logger.info(f"屏幕信息: {self.screen_info}")
+        
+        # Windows API函数
+        if platform.system() == "Windows":
+            self.user32 = ctypes.windll.user32
+            self.gdi32 = ctypes.windll.gdi32
 
     def _get_dpi_scale(self) -> float:
         """获取当前系统的DPI缩放因子"""
         try:
             if platform.system() == "Windows":
                 import ctypes
-
-                # 获取DPI
-                user32 = ctypes.windll.user32
-                user32.SetProcessDPIAware()
-                dc = user32.GetDC(0)
-                dpi = ctypes.windll.gdi32.GetDeviceCaps(dc, 88)  # LOGPIXELSX
-                user32.ReleaseDC(0, dc)
-                scale = dpi / 96.0  # 96 DPI是标准DPI
-                return scale
+                from ctypes import wintypes
+                
+                # 方法1: 使用GetDpiForSystem (Windows 10 1607+)
+                try:
+                    dpi = ctypes.windll.user32.GetDpiForSystem()
+                    if dpi > 0:
+                        scale = dpi / 96.0
+                        logger.info(f"使用GetDpiForSystem获取DPI: {dpi}, 缩放: {scale}")
+                        return scale
+                except:
+                    pass
+                
+                # 方法2: 使用GetDeviceCaps
+                try:
+                    dc = self.user32.GetDC(0)
+                    dpi_x = self.gdi32.GetDeviceCaps(dc, 88)  # LOGPIXELSX
+                    dpi_y = self.gdi32.GetDeviceCaps(dc, 90)  # LOGPIXELSY
+                    self.user32.ReleaseDC(0, dc)
+                    scale = dpi_x / 96.0
+                    logger.info(f"使用GetDeviceCaps获取DPI: X={dpi_x}, Y={dpi_y}, 缩放: {scale}")
+                    return scale
+                except Exception as e:
+                    logger.warning(f"GetDeviceCaps方法失败: {e}")
+                
+                # 方法3: 使用GetDpiForMonitor (Windows 8.1+)
+                try:
+                    # 获取主显示器句柄
+                    monitor = self.user32.MonitorFromPoint(ctypes.wintypes.POINT(0, 0), 1)  # MONITOR_DEFAULTTOPRIMARY
+                    if monitor:
+                        # 定义MONITOR_DPI_TYPE枚举
+                        MDT_EFFECTIVE_DPI = 0
+                        dpi_x = ctypes.c_uint()
+                        dpi_y = ctypes.c_uint()
+                        
+                        # 调用GetDpiForMonitor
+                        shcore = ctypes.windll.shcore
+                        result = shcore.GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, 
+                                                       ctypes.byref(dpi_x), ctypes.byref(dpi_y))
+                        if result == 0:  # S_OK
+                            scale = dpi_x.value / 96.0
+                            logger.info(f"使用GetDpiForMonitor获取DPI: X={dpi_x.value}, Y={dpi_y.value}, 缩放: {scale}")
+                            return scale
+                except Exception as e:
+                    logger.warning(f"GetDpiForMonitor方法失败: {e}")
+                
+                # 方法4: 使用tkinter获取DPI (通常很可靠)
+                try:
+                    import tkinter as tk
+                    root = tk.Tk()
+                    root.withdraw()  # 隐藏窗口
+                    dpi = root.winfo_fpixels('1i')  # 获取每英寸的像素数
+                    root.destroy()
+                    scale = dpi / 96.0
+                    logger.info(f"使用tkinter获取DPI: {dpi}, 缩放: {scale}")
+                    return scale
+                except Exception as e:
+                    logger.warning(f"tkinter方法失败: {e}")
+                
+                # 方法5: 使用注册表方法
+                try:
+                    import winreg
+                    key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                       r"Control Panel\Desktop\WindowMetrics")
+                    value, _ = winreg.QueryValueEx(key, "AppliedDPI")
+                    winreg.CloseKey(key)
+                    scale = value / 96.0
+                    logger.info(f"使用注册表获取DPI: {value}, 缩放: {scale}")
+                    return scale
+                except Exception as e:
+                    logger.warning(f"注册表方法失败: {e}")
+                
+                logger.warning("所有DPI获取方法都失败，使用默认值1.0")
+                return 1.0
             else:
-                # Linux/Mac系统的处理
                 return 1.0
         except Exception as e:
-            logger.warning(f"无法获取DPI缩放因子: {e}")
+            logger.error(f"获取DPI缩放因子时发生错误: {e}")
             return 1.0
+    
+    def _get_screen_info(self) -> Dict[str, Any]:
+        """获取屏幕信息"""
+        try:
+            if platform.system() == "Windows":
+                # 获取虚拟屏幕尺寸（包括所有显示器）
+                virtual_width = self.user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+                virtual_height = self.user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+                virtual_left = self.user32.GetSystemMetrics(76)   # SM_XVIRTUALSCREEN
+                virtual_top = self.user32.GetSystemMetrics(77)    # SM_YVIRTUALSCREEN
+                
+                # 获取主显示器尺寸
+                primary_width = self.user32.GetSystemMetrics(0)   # SM_CXSCREEN
+                primary_height = self.user32.GetSystemMetrics(1)  # SM_CYSCREEN
+                
+                return {
+                    "virtual": {
+                        "left": virtual_left,
+                        "top": virtual_top,
+                        "width": virtual_width,
+                        "height": virtual_height
+                    },
+                    "primary": {
+                        "width": primary_width,
+                        "height": primary_height
+                    }
+                }
+            else:
+                return {"primary": {"width": 1920, "height": 1080}}
+        except Exception as e:
+            logger.warning(f"无法获取屏幕信息: {e}")
+            return {"primary": {"width": 1920, "height": 1080}}
 
     def capture_screen(
         self, region: Tuple[int, int, int, int] = None
     ) -> Optional[np.ndarray]:
         """
-        捕获屏幕截图
+        捕获屏幕截图，使用多种方法确保成功
 
         Args:
             region: 截图区域 (x, y, width, height)，None表示全屏
@@ -78,48 +177,141 @@ class ScreenCaptureEngine:
             截图的numpy数组，失败返回None
         """
         try:
-            logger.info(f"开始截图，区域: {region}，DPI缩放: {self.dpi_scale}")
-
-            # 添加延迟确保界面稳定
-            time.sleep(self.default_config["screenshot_delay"])
-
-            if region:
-                # 指定区域截图，应用DPI缩放
-                x, y, width, height = region
-
-                # 对于高DPI显示器，需要调整坐标和尺寸
-                if self.dpi_scale != 1.0:
-                    # 方法1：尝试使用PIL直接截图（更准确的DPI处理）
-                    try:
-                        from PIL import ImageGrab
-
-                        # PIL的ImageGrab能更好地处理高DPI
-                        screenshot = ImageGrab.grab(bbox=(x, y, x + width, y + height))
-                        logger.info(f"使用PIL截图，尺寸: {screenshot.size}")
-                    except ImportError:
-                        # 回退到pyautogui，但调整坐标
-                        logger.info("PIL不可用，使用pyautogui截图")
-                        screenshot = pyautogui.screenshot(region=(x, y, width, height))
-                else:
-                    screenshot = pyautogui.screenshot(region=(x, y, width, height))
-            else:
-                # 全屏截图
+            # 方法1：尝试使用MSS
+            if self.mss:
                 try:
-                    from PIL import ImageGrab
-
-                    screenshot = ImageGrab.grab()
-                    logger.info(f"使用PIL全屏截图，尺寸: {screenshot.size}")
-                except ImportError:
-                    screenshot = pyautogui.screenshot()
-
-            # 转换为OpenCV格式
-            screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
-
-            logger.info(f"截图成功，最终尺寸: {screenshot_cv.shape}")
-            return screenshot_cv
-
+                    result = self._capture_with_mss(region)
+                    if result is not None:
+                        return result
+                except Exception as e:
+                    logger.warning(f"MSS截图失败: {e}")
+            
+            # 方法2：回退到Windows GDI API
+            try:
+                result = self._capture_with_gdi(region)
+                if result is not None:
+                    logger.info("GDI截图成功")
+                    return result
+            except Exception as e:
+                logger.warning(f"GDI截图失败: {e}")
+            
+            # 方法3：最后回退到PIL
+            try:
+                result = self._capture_with_pil(region)
+                if result is not None:
+                    logger.info("PIL截图成功")
+                    return result
+            except Exception as e:
+                logger.warning(f"PIL截图失败: {e}")
+            
+            logger.error("所有截图方法都失败了")
+            return None
+            
         except Exception as e:
-            logger.error(f"截图失败: {e}")
+            logger.error(f"截图异常: {e}")
+            return None
+
+    def _capture_with_mss(self, region: Tuple[int, int, int, int] = None) -> Optional[np.ndarray]:
+        """使用MSS截图"""
+        if region:
+            x, y, width, height = region
+            monitor = {
+                "left": int(x),
+                "top": int(y),
+                "width": int(width),
+                "height": int(height)
+            }
+            screenshot_mss = self.mss.grab(monitor)
+        else:
+            screenshot_mss = self.mss.grab(self.mss.monitors[1])
+        
+        # 转换为OpenCV格式
+        screenshot_np = np.array(screenshot_mss)
+        if screenshot_np.shape[2] == 4:  # BGRA
+            screenshot_cv = cv2.cvtColor(screenshot_np, cv2.COLOR_BGRA2BGR)
+        else:
+            screenshot_cv = screenshot_np
+        
+        return screenshot_cv
+
+    def _capture_with_gdi(self, region: Tuple[int, int, int, int] = None) -> Optional[np.ndarray]:
+        """使用Windows GDI API截图"""
+        if platform.system() != "Windows":
+            return None
+            
+        try:
+            if region:
+                x, y, width, height = region
+            else:
+                # 全屏
+                x, y = 0, 0
+                width = self.screen_info["primary"]["width"]
+                height = self.screen_info["primary"]["height"]
+            
+            # 获取屏幕DC
+            screen_dc = self.user32.GetDC(0)
+            mem_dc = self.gdi32.CreateCompatibleDC(screen_dc)
+            
+            # 创建位图
+            bitmap = self.gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+            old_bitmap = self.gdi32.SelectObject(mem_dc, bitmap)
+            
+            # 复制屏幕内容
+            self.gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, x, y, 0x00CC0020)  # SRCCOPY
+            
+            # 获取位图数据
+            bmp_info = wintypes.BITMAPINFO()
+            bmp_info.bmiHeader.biSize = ctypes.sizeof(bmp_info.bmiHeader)
+            bmp_info.bmiHeader.biWidth = width
+            bmp_info.bmiHeader.biHeight = -height  # 负值表示从上到下
+            bmp_info.bmiHeader.biPlanes = 1
+            bmp_info.bmiHeader.biBitCount = 32
+            bmp_info.bmiHeader.biCompression = 0  # BI_RGB
+            
+            buffer_size = width * height * 4
+            buffer = (ctypes.c_char * buffer_size)()
+            
+            lines = self.gdi32.GetDIBits(
+                mem_dc, bitmap, 0, height, buffer,
+                ctypes.byref(bmp_info), 0
+            )
+            
+            # 清理资源
+            self.gdi32.SelectObject(mem_dc, old_bitmap)
+            self.gdi32.DeleteObject(bitmap)
+            self.gdi32.DeleteDC(mem_dc)
+            self.user32.ReleaseDC(0, screen_dc)
+            
+            if lines == height:
+                # 转换为numpy数组
+                img_data = np.frombuffer(buffer, dtype=np.uint8)
+                img_data = img_data.reshape((height, width, 4))
+                # BGRA -> BGR
+                screenshot_cv = cv2.cvtColor(img_data, cv2.COLOR_BGRA2BGR)
+                return screenshot_cv
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"GDI截图失败: {e}")
+            return None
+
+    def _capture_with_pil(self, region: Tuple[int, int, int, int] = None) -> Optional[np.ndarray]:
+        """使用PIL截图"""
+        try:
+            from PIL import ImageGrab
+            
+            if region:
+                x, y, width, height = region
+                screenshot = ImageGrab.grab(bbox=(x, y, x + width, y + height))
+            else:
+                screenshot = ImageGrab.grab()
+            
+            screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+            return screenshot_cv
+            
+        except ImportError:
+            logger.error("PIL未安装")
             return None
 
     def capture_window(
@@ -139,14 +331,14 @@ class ScreenCaptureEngine:
             logger.info(f"开始捕获窗口: {window_title}")
 
             if window_rect:
-                # 使用提供的窗口矩形
+                # 使用提供的窗口矩形进行截图
                 region = (
                     window_rect["x"],
                     window_rect["y"],
                     window_rect["width"],
                     window_rect["height"],
                 )
-                screenshot = self.capture_screen(region)
+                return self.capture_screen(region)
             else:
                 # 尝试查找窗口
                 window_info = self.find_window_by_title(window_title)
@@ -157,43 +349,22 @@ class ScreenCaptureEngine:
                         window_info["width"],
                         window_info["height"],
                     )
-                    screenshot = self.capture_screen(region)
+                    return self.capture_screen(region)
                 else:
                     logger.warning(f"未找到窗口: {window_title}")
-                    # 使用全屏截图作为备选
-                    screenshot = self.capture_screen()
-
-            if screenshot is not None:
-                logger.info(f"窗口截图成功: {window_title}")
-                return screenshot
-            else:
-                logger.error(f"窗口截图失败: {window_title}")
-                return None
+                    return None
 
         except Exception as e:
             logger.error(f"捕获窗口失败: {e}")
             return None
 
     def find_window_by_title(self, window_title: str) -> Optional[Dict[str, Any]]:
-        """
-        根据标题查找窗口
-
-        Args:
-            window_title: 窗口标题
-
-        Returns:
-            窗口信息字典，未找到返回None
-        """
+        """根据标题查找窗口"""
         try:
             from .windows_select import window_selector
-
-            logger.info(f"查找窗口: {window_title}")
-
-            # 使用真实的Windows API查找窗口
             window = window_selector.get_window_by_title(window_title)
-
             if window:
-                window_info = {
+                return {
                     "title": window.title,
                     "x": window.rect["x"],
                     "y": window.rect["y"],
@@ -202,262 +373,45 @@ class ScreenCaptureEngine:
                     "hwnd": window.hwnd,
                     "process_name": window.process_name,
                 }
-                logger.info(f"找到窗口: {window_info}")
-                return window_info
-            else:
-                logger.warning(f"未找到窗口: {window_title}")
-                return None
-
+            return None
         except Exception as e:
             logger.error(f"查找窗口失败: {e}")
-            # 如果Windows API失败，使用备用方案
-            return self._fallback_find_window(window_title)
-
-    def _fallback_find_window(self, window_title: str) -> Optional[Dict[str, Any]]:
-        """
-        备用窗口查找方案
-
-        Args:
-            window_title: 窗口标题
-
-        Returns:
-            窗口信息字典，未找到返回None
-        """
-        try:
-            logger.warning(f"窗口查找功能开发中: {window_title}")
-            return None
-
-        except Exception as e:
-            logger.error(f"备用方案查找窗口失败: {e}")
             return None
 
     def get_window_list(self) -> List[Dict[str, Any]]:
-        """
-        获取当前所有窗口的列表
-
-        Returns:
-            窗口信息列表
-        """
+        """获取窗口列表"""
         try:
             from .windows_select import window_selector
-
-            logger.info("获取窗口列表")
-
-            # 使用真实的Windows API获取窗口列表
             windows = window_selector.get_all_windows()
-            windows_data = []
-
-            for window in windows:
-                windows_data.append(
-                    {
-                        "title": window.title,
-                        "x": window.rect["x"],
-                        "y": window.rect["y"],
-                        "width": window.rect["width"],
-                        "height": window.rect["height"],
-                        "hwnd": window.hwnd,
-                        "process_name": window.process_name,
-                    }
-                )
-
-            logger.info(f"找到 {len(windows_data)} 个窗口")
-            return windows_data
-
+            return [
+                {
+                    "title": w.title,
+                    "x": w.rect["x"],
+                    "y": w.rect["y"],
+                    "width": w.rect["width"],
+                    "height": w.rect["height"],
+                    "hwnd": w.hwnd,
+                    "process_name": w.process_name,
+                }
+                for w in windows
+            ]
         except Exception as e:
             logger.error(f"获取窗口列表失败: {e}")
-            # 如果Windows API失败，返回空列表
             return []
 
     def save_screenshot(self, image: np.ndarray, filename: str = None) -> str:
-        """
-        保存截图到临时文件
-
-        Args:
-            image: 图像数组
-            filename: 文件名，None则自动生成
-
-        Returns:
-            保存的文件路径
-        """
+        """保存截图"""
         try:
             if filename is None:
-                # 生成临时文件名
-                temp_file = tempfile.NamedTemporaryFile(
-                    delete=False, suffix=f".{self.default_config['screenshot_format']}"
-                )
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 filename = temp_file.name
                 temp_file.close()
 
-            # 保存图像
             success = cv2.imwrite(filename, image)
-
-            if success:
-                logger.info(f"截图已保存: {filename}")
-                return filename
-            else:
-                logger.error(f"保存截图失败: {filename}")
-                return ""
-
+            return filename if success else ""
         except Exception as e:
-            logger.error(f"保存截图异常: {e}")
+            logger.error(f"保存截图失败: {e}")
             return ""
-
-    def get_screen_size(self) -> Tuple[int, int]:
-        """
-        获取屏幕尺寸
-
-        Returns:
-            屏幕宽度和高度
-        """
-        try:
-            size = pyautogui.size()
-            logger.info(f"屏幕尺寸: {size}")
-            return size
-        except Exception as e:
-            logger.error(f"获取屏幕尺寸失败: {e}")
-            return (1920, 1080)  # 默认尺寸
-
-    def capture_window_with_matching(
-        self,
-        window_title: str,
-        template_image: np.ndarray,
-        matcher_engine,
-        config: Dict[str, Any] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        捕获窗口并执行模板匹配
-
-        Args:
-            window_title: 窗口标题
-            template_image: 模板图像
-            matcher_engine: 匹配引擎（template_matcher 或 orb_matcher）
-            config: 匹配配置
-
-        Returns:
-            匹配结果字典
-        """
-        try:
-            logger.info(f"开始窗口匹配: {window_title}")
-
-            # 捕获窗口
-            window_screenshot = self.capture_window(window_title)
-            if window_screenshot is None:
-                logger.error("窗口截图失败")
-                return None
-
-            # 执行匹配
-            if hasattr(matcher_engine, "match_features"):
-                # ORB匹配
-                result = matcher_engine.match_features(
-                    template_image, window_screenshot, config
-                )
-            elif hasattr(matcher_engine, "find_template_in_image"):
-                # 模板匹配 - 需要先保存图像
-                template_path = self.save_screenshot(
-                    template_image, "temp_template.png"
-                )
-                target_path = self.save_screenshot(window_screenshot, "temp_target.png")
-
-                if template_path and target_path:
-                    # 使用OpenCV模板匹配
-                    result = self._opencv_template_match(
-                        template_image, window_screenshot, config
-                    )
-
-                    # 清理临时文件
-                    try:
-                        os.remove(template_path)
-                        os.remove(target_path)
-                    except:
-                        pass
-                else:
-                    logger.error("保存临时文件失败")
-                    return None
-            else:
-                logger.error("不支持的匹配引擎")
-                return None
-
-            if result:
-                # 添加窗口信息到结果中
-                result["window_title"] = window_title
-                result["window_screenshot_path"] = self.save_screenshot(
-                    window_screenshot
-                )
-                logger.info(f"窗口匹配成功: {window_title}")
-            else:
-                logger.warning(f"窗口匹配失败: {window_title}")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"窗口匹配异常: {e}")
-            return None
-
-    def _opencv_template_match(
-        self, template: np.ndarray, target: np.ndarray, config: Dict[str, Any] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        使用OpenCV进行模板匹配
-
-        Args:
-            template: 模板图像
-            target: 目标图像
-            config: 匹配配置
-
-        Returns:
-            匹配结果字典
-        """
-        try:
-            if config is None:
-                config = {"method": "TM_CCOEFF_NORMED", "threshold": 0.8}
-
-            # 方法映射
-            methods = {
-                "TM_CCOEFF_NORMED": cv2.TM_CCOEFF_NORMED,
-                "TM_CCORR_NORMED": cv2.TM_CCORR_NORMED,
-                "TM_SQDIFF_NORMED": cv2.TM_SQDIFF_NORMED,
-            }
-
-            method = methods.get(
-                config.get("method", "TM_CCOEFF_NORMED"), cv2.TM_CCOEFF_NORMED
-            )
-            threshold = config.get("threshold", 0.8)
-
-            # 执行匹配
-            result = cv2.matchTemplate(target, template, method)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-
-            # 根据方法选择合适的值和位置
-            if method in [cv2.TM_SQDIFF, cv2.TM_SQDIFF_NORMED]:
-                match_val = min_val
-                match_loc = min_loc
-                confidence = 1 - match_val
-            else:
-                match_val = max_val
-                match_loc = max_loc
-                confidence = match_val
-
-            if confidence >= threshold:
-                template_h, template_w = template.shape[:2]
-                center_x = match_loc[0] + template_w // 2
-                center_y = match_loc[1] + template_h // 2
-
-                return {
-                    "method": "template_matching",
-                    "confidence": float(confidence),
-                    "left": int(match_loc[0]),
-                    "top": int(match_loc[1]),
-                    "width": int(template_w),
-                    "height": int(template_h),
-                    "center_x": int(center_x),
-                    "center_y": int(center_y),
-                }
-            else:
-                return None
-
-        except Exception as e:
-            logger.error(f"OpenCV模板匹配失败: {e}")
-            return None
 
 
 # 创建全局实例
