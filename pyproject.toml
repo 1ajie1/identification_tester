@@ -3,15 +3,35 @@ name = "identification-tester"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
+sys_platform = "win32"
 dependencies = [
-    "numpy>=2.0.0",
-    "opencv-python>=4.12.0.88",
+    "numpy>=1.26.0,<2.0.0",
     "psutil>=7.0.0",
     "pyautogui>=0.9.54",
     "pyside6==6.8.2.1",
     "pywin32>=311",
     "mss>=9.0.1",
+    # GPU加速YOLO相关依赖
     "ultralytics>=8.3.189",
+    "torch==2.0.1+cu117",
+    "torchvision==0.15.2+cu117",
     "onnxruntime-gpu>=1.22.0",
+    # OpenCV (使用稳定版本)
+    "opencv-python-headless>=4.9.0,<4.12.0",
+    "opencv-contrib-python-headless>=4.9.0,<4.12.0",
 ]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
+
+
+# 限制只检查当前环境（Windows + Python 3.11）
+[tool.uv]
+environments = ["sys_platform == 'win32' and python_version == '3.11'"]
+
+
+# 添加PyTorch专用索引
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu117"
