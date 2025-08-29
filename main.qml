@@ -9,7 +9,7 @@ QtObject {
     
     Component.onCompleted: {
         // 创建控制窗口
-        var controlComponent = Qt.createComponent("ControlWindow.qml")
+        var controlComponent = Qt.createComponent("qml/ControlWindow.qml")
         if (controlComponent.status === Component.Ready) {
             controlWindow = controlComponent.createObject(null, {
                 x: 100,
@@ -28,7 +28,7 @@ QtObject {
         }
         
         // 创建显示窗口
-        var displayComponent = Qt.createComponent("DisplayWindow.qml")
+        var displayComponent = Qt.createComponent("qml/DisplayWindow.qml")
         if (displayComponent.status === Component.Ready) {
             displayWindow = displayComponent.createObject(null, {
                 x: 600,

@@ -84,7 +84,7 @@ ApplicationWindow {
                                     }
                                     
                                     Text {
-                                        text: "请选择第一张图片"
+                                        text: "请选择模板图片"
                                         font.pixelSize: 14
                                         color: "#666666"
                                         anchors.horizontalCenter: parent.horizontalCenter
@@ -205,7 +205,7 @@ ApplicationWindow {
                                     }
                                     
                                     Text {
-                                        text: "请选择第二张图片"
+                                        text: "请选择待匹配的图片"
                                         font.pixelSize: 14
                                         color: "#666666"
                                         anchors.horizontalCenter: parent.horizontalCenter
@@ -300,11 +300,8 @@ ApplicationWindow {
         nameFilters: ["图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)", "所有文件 (*)"]
         onAccepted: {
             var filePath = selectedFile.toString().replace("file:///", "")
-            addLog("用户选择图片1: " + (filePath.split('/').pop() || filePath.split('\\').pop()), "info")
+            addLog("用户选择模板图片: " + (filePath.split('/').pop() || filePath.split('\\').pop()), "info")
             controller.selectImage1(filePath)
-        }
-        onRejected: {
-            addLog("图片1选择已取消", "warning")
         }
     }
     
@@ -314,12 +311,10 @@ ApplicationWindow {
         nameFilters: ["图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)", "所有文件 (*)"]
         onAccepted: {
             var filePath = selectedFile.toString().replace("file:///", "")
-            addLog("用户选择图片2: " + (filePath.split('/').pop() || filePath.split('\\').pop()), "info")
+            addLog("用户选择待匹配的图片: " + (filePath.split('/').pop() || filePath.split('\\').pop()), "info")
             controller.selectImage2(filePath)
         }
-        onRejected: {
-            addLog("图片2选择已取消", "warning")
-        }
+        
     }
     
     // 窗口选择器组件
@@ -387,14 +382,14 @@ ApplicationWindow {
             addLog("显示窗口切换到" + modeText + "模式", "info")
         }
         
-        function onImage1Selected(path) {
+        function onNeedleImage(path) {
             var filename = path.split('/').pop() || path.split('\\').pop()
-            addLog("图片1加载完成: " + filename, "success")
+            addLog("模板图片加载完成: " + filename, "success")
         }
         
-        function onImage2Selected(path) {
+        function onHaystackImage(path) {
             var filename = path.split('/').pop() || path.split('\\').pop()
-            addLog("图片2加载完成: " + filename, "success")
+            addLog("待匹配的图片加载完成: " + filename, "success")
         }
         
         function onWindowSelected(windowTitle) {
