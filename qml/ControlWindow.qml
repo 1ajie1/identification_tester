@@ -494,6 +494,70 @@ ApplicationWindow {
                     width: parent.width
                     spacing: 12
 
+                    // 通用计算设备选择
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        visible: algorithmComboBox.currentIndex === 2 || algorithmComboBox.currentIndex === 3  // 只有YOLO相关算法显示
+
+                        Text {
+                            text: "计算设备设置"
+                            font.pixelSize: 14
+                            font.bold: true
+                            color: primaryColor
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "计算设备："
+                                Layout.minimumWidth: 70
+                            }
+                            ComboBox {
+                                id: deviceComboBox
+                                Layout.fillWidth: true
+                                model: ListModel {
+                                    id: deviceListModel
+                                }
+                                
+                                textRole: "name"
+                                valueRole: "id"
+                                
+                                Component.onCompleted: {
+                                    updateDeviceList();
+                                }
+                                
+                                onCurrentIndexChanged: {
+                                    if (currentIndex >= 0 && deviceListModel.count > 0) {
+                                        var deviceId = deviceListModel.get(currentIndex).id;
+                                        controller.setCurrentDevice(deviceId);
+                                    }
+                                }
+                            }
+                        }
+
+                        // 设备信息显示
+                        Text {
+                            Layout.fillWidth: true
+                            text: {
+                                if (deviceComboBox.currentIndex >= 0 && deviceListModel.count > 0) {
+                                    var device = deviceListModel.get(deviceComboBox.currentIndex);
+                                    return device.type === "gpu" ? "🖥️ GPU加速计算" : "💻 CPU计算";
+                                }
+                                return "💻 CPU计算";
+                            }
+                            font.pixelSize: 11
+                            color: "#666666"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: "#E0E0E0"
+                        }
+                    }
+
                     // 模板匹配参数
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -1022,6 +1086,31 @@ ApplicationWindow {
         pureYoloModelPathText.fullPath = "";
 
         addLog("参数已重置为默认值", "info");
+    }
+
+    // 更新设备列表的函数
+    function updateDeviceList() {
+        deviceListModel.clear();
+        
+        var devices = controller.availableDevices;
+        if (devices && devices.length > 0) {
+            for (var i = 0; i < devices.length; i++) {
+                deviceListModel.append({
+                    "id": devices[i].id,
+                    "name": devices[i].name,
+                    "type": devices[i].type
+                });
+            }
+        }
+        
+        // 设置默认选择为CPU
+        var currentDevice = controller.currentDevice;
+        for (var j = 0; j < deviceListModel.count; j++) {
+            if (deviceListModel.get(j).id === currentDevice) {
+                deviceComboBox.currentIndex = j;
+                break;
+            }
+        }
     }
 
     // 应用设置的函数

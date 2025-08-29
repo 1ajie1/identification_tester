@@ -60,6 +60,9 @@ class YOLOORBMatchingEngine:
         self.yolo_net = None
         self.yolo_classes = []
         self.yolo_output_layers = []
+        
+        # 设备设置
+        self.device = "cpu"  # 默认使用CPU
 
         # 初始化YOLO（如果模型可用）
         self._init_yolo()
@@ -229,6 +232,24 @@ class YOLOORBMatchingEngine:
                 "num_classes": 80,
                 "model_type": "error_fallback_yolo_orb"
             }
+    
+    def set_device(self, device_id: str):
+        """
+        设置计算设备
+        
+        Args:
+            device_id: 设备ID (如 "cpu", "cuda:0", "cuda:1" 等)
+        """
+        try:
+            self.device = device_id
+            logger.info(f"YOLO+ORB匹配器设备设置为: {device_id}")
+            
+            # 如果设备改变，可能需要重新加载模型
+            # 这里可以添加模型重新加载的逻辑
+            
+        except Exception as e:
+            logger.error(f"设置YOLO+ORB设备失败: {e}")
+            self.device = "cpu"  # 回退到CPU
 
     def reload_model(self, model_path: str):
         """

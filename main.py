@@ -63,6 +63,10 @@ class ImageMatcherController(QObject):
         # 动态颜色映射
         self._class_colors = {}  # 类别ID到颜色的映射
         self._model_classes = {}  # 模型类别信息
+        
+        # 设备管理
+        self._available_devices = self._detect_available_devices()
+        self._current_device = "cpu"  # 默认使用CPU
 
         # 算法配置参数
         self._algorithm_settings = {
@@ -135,6 +139,16 @@ class ImageMatcherController(QObject):
     @Property('QVariant', notify=windowSelected)
     def selectedWindowRect(self):
         return self._selected_window_rect
+    
+    @Property('QVariant')
+    def availableDevices(self):
+        """获取可用设备列表"""
+        return self._available_devices
+    
+    @Property(str)
+    def currentDevice(self):
+        """获取当前选择的设备"""
+        return self._current_device
 
     @Property(str, notify=screenAreaImageChanged)
     def screenAreaImagePath(self):
@@ -1393,6 +1407,47 @@ class ImageMatcherController(QObject):
     def addLog(self, message, log_type):
         """添加日志"""
         self.logAdded.emit(message, log_type)
+    
+    @Slot(str)
+    def setCurrentDevice(self, device_id):
+        """设置当前使用的计算设备"""
+        try:
+            # 验证设备ID是否有效
+            device_found = False
+            device_name = ""
+            for device in self._available_devices:
+                if device["id"] == device_id:
+                    device_found = True
+                    device_name = device["name"]
+                    break
+            
+            if device_found:
+                self._current_device = device_id
+                self.logAdded.emit(f"切换计算设备到: {device_name}", "success")
+                
+                # 通知YOLO匹配器更新设备设置
+                self._update_matcher_device_settings()
+            else:
+                self.logAdded.emit(f"无效的设备ID: {device_id}", "error")
+                
+        except Exception as e:
+            self.logAdded.emit(f"设置计算设备失败: {e}", "error")
+            logger.error(f"设置计算设备失败: {e}")
+    
+    def _update_matcher_device_settings(self):
+        """更新匹配器的设备设置"""
+        try:
+            # 更新纯YOLO匹配器的设备设置
+            if hasattr(pure_yolo_matcher, 'set_device'):
+                pure_yolo_matcher.set_device(self._current_device)
+            
+            # 更新YOLO+ORB匹配器的设备设置
+            if hasattr(yolo_orb_matcher, 'set_device'):
+                yolo_orb_matcher.set_device(self._current_device)
+                
+            logger.info(f"已更新匹配器设备设置为: {self._current_device}")
+        except Exception as e:
+            logger.error(f"更新匹配器设备设置失败: {e}")
 
     @Slot(int, str)
     def updateAlgorithmSettings(self, algorithm_index, settings_json):
@@ -1535,6 +1590,55 @@ class ImageMatcherController(QObject):
             # 缓存这个颜色
             self._class_colors[class_id] = hex_color
             return hex_color
+    
+    def _detect_available_devices(self):
+        """
+        检测可用的计算设备
+        
+        Returns:
+            list: 可用设备列表
+        """
+        devices = [{"id": "cpu", "name": "CPU", "type": "cpu"}]
+        
+        try:
+            # 检测CUDA GPU
+            import torch
+            if torch.cuda.is_available():
+                gpu_count = torch.cuda.device_count()
+                for i in range(gpu_count):
+                    gpu_name = torch.cuda.get_device_name(i)
+                    devices.append({
+                        "id": f"cuda:{i}",
+                        "name": f"GPU {i}: {gpu_name}",
+                        "type": "gpu"
+                    })
+                logger.info(f"检测到 {gpu_count} 个CUDA GPU")
+            else:
+                logger.info("未检测到可用的CUDA GPU")
+        except ImportError:
+            logger.info("PyTorch未安装，无法检测CUDA设备")
+        except Exception as e:
+            logger.warning(f"检测CUDA设备时出错: {e}")
+        
+        try:
+            # 检测OpenCL设备（可选）
+            import pyopencl as cl  # type: ignore
+            platforms = cl.get_platforms()
+            for platform in platforms:
+                for device in platform.get_devices():
+                    if device.type == cl.device_type.GPU:
+                        devices.append({
+                            "id": f"opencl:{device.name}",
+                            "name": f"OpenCL GPU: {device.name}",
+                            "type": "gpu"
+                        })
+        except ImportError:
+            pass  # OpenCL是可选的
+        except Exception as e:
+            logger.debug(f"检测OpenCL设备时出错: {e}")
+        
+        logger.info(f"检测到 {len(devices)} 个可用设备: {[d['name'] for d in devices]}")
+        return devices
 
     @Slot()
     def startRealtimeDetection(self):
