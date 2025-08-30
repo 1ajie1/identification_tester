@@ -10,6 +10,13 @@ ApplicationWindow {
     visible: true
     title: "图片匹配器 - 控制面板"
     flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
+    
+    // 阻止默认的关闭行为，只隐藏窗口
+    onClosing: function(close) {
+        close.accepted = false  // 阻止默认关闭
+        controlWindow.hide()    // 只隐藏窗口
+        addLog("控制面板已隐藏 - 可通过托盘菜单重新显示", "info")
+    }
 
     // 现代化的颜色主题
     property color primaryColor: "#2196F3"
@@ -855,6 +862,36 @@ ApplicationWindow {
                             }
                         }
 
+                        // YOLO后端选择
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "推理后端："
+                                Layout.minimumWidth: 70
+                            }
+                            ComboBox {
+                                id: yoloOrbBackendCombo
+                                Layout.fillWidth: true
+                                model: ["PyTorch"]
+                                currentIndex: 0
+                                
+                                onCurrentIndexChanged: {
+                                    // 更新后端提示信息
+                                    updateBackendInfo();
+                                }
+                            }
+                        }
+
+                        // 后端信息提示
+                        Text {
+                            id: yoloOrbBackendInfo
+                            Layout.fillWidth: true
+                            text: "PyTorch：支持.pt/.onnx模型，GPU加速效果更好"
+                            font.pixelSize: 10
+                            color: "#888888"
+                            wrapMode: Text.WordWrap
+                        }
+
                         // YOLO模型文件选择
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -958,6 +995,36 @@ ApplicationWindow {
                                 text: pureYoloNmsSlider.value.toFixed(2)
                                 Layout.minimumWidth: 40
                             }
+                        }
+
+                        // YOLO后端选择
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "推理后端："
+                                Layout.minimumWidth: 70
+                            }
+                            ComboBox {
+                                id: pureYoloBackendCombo
+                                Layout.fillWidth: true
+                                model: ["PyTorch"]
+                                currentIndex: 0
+                                
+                                onCurrentIndexChanged: {
+                                    // 更新后端提示信息
+                                    updateBackendInfo();
+                                }
+                            }
+                        }
+
+                        // 后端信息提示
+                        Text {
+                            id: pureYoloBackendInfo
+                            Layout.fillWidth: true
+                            text: "PyTorch：支持.pt/.onnx模型，GPU加速效果更好"
+                            font.pixelSize: 10
+                            color: "#888888"
+                            wrapMode: Text.WordWrap
                         }
 
                         // YOLO模型文件选择
@@ -1078,12 +1145,14 @@ ApplicationWindow {
         yoloOrbFeaturesSpinBox.value = 500;
         yoloOrbModelPathText.text = "未选择模型文件";
         yoloOrbModelPathText.fullPath = "";
+        yoloOrbBackendCombo.currentIndex = 0;
 
         // 纯YOLO默认值
         pureYoloConfidenceSlider.value = 0.5;
         pureYoloNmsSlider.value = 0.4;
         pureYoloModelPathText.text = "未选择模型文件";
         pureYoloModelPathText.fullPath = "";
+        pureYoloBackendCombo.currentIndex = 0;
 
         addLog("参数已重置为默认值", "info");
     }
@@ -1113,6 +1182,21 @@ ApplicationWindow {
         }
     }
 
+    // 更新后端信息提示
+    function updateBackendInfo() {
+        var backendText = "PyTorch：支持.pt/.onnx模型，GPU加速效果更好";
+        
+        // 更新YOLO+ORB后端信息
+        if (typeof yoloOrbBackendCombo !== "undefined" && yoloOrbBackendInfo) {
+            yoloOrbBackendInfo.text = backendText;
+        }
+        
+        // 更新纯YOLO后端信息
+        if (typeof pureYoloBackendCombo !== "undefined" && pureYoloBackendInfo) {
+            pureYoloBackendInfo.text = backendText;
+        }
+    }
+
     // 应用设置的函数
     function applySettings() {
         var settings = {};
@@ -1139,18 +1223,22 @@ ApplicationWindow {
             };
             break;
         case 2: // YOLO+ORB
+            var currentDevice = controller.currentDevice || "cpu";
             settings = {
                 yolo_confidence: yoloConfidenceSlider.value,
                 nms_threshold: nmsThresholdSlider.value,
                 orb_nfeatures: yoloOrbFeaturesSpinBox.value,
-                model_path: yoloOrbModelPathText.fullPath || ""
+                model_path: yoloOrbModelPathText.fullPath || "",
+                device: currentDevice
             };
             break;
         case 3: // 纯YOLO
+            var currentDevice = controller.currentDevice || "cpu";
             settings = {
                 confidence_threshold: pureYoloConfidenceSlider.value,
                 nms_threshold: pureYoloNmsSlider.value,
-                model_path: pureYoloModelPathText.fullPath || ""
+                model_path: pureYoloModelPathText.fullPath || "",
+                device: currentDevice
             };
             break;
         }

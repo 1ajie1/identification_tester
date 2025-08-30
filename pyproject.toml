@@ -16,10 +16,11 @@ dependencies = [
     "ultralytics>=8.3.189",
     "torch==2.0.1+cu117",
     "torchvision==0.15.2+cu117",
-    "onnxruntime-gpu>=1.22.0",
     # OpenCV (使用稳定版本)
     "opencv-python-headless>=4.9.0,<4.12.0",
     "opencv-contrib-python-headless>=4.9.0,<4.12.0",
+    "torchaudio>=2.0.2",
+    "onnxruntime-gpu==1.16.3",
 ]
 
 [[tool.uv.index]]

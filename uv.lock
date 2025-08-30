@@ -115,6 +115,7 @@ dependencies = [
     { name = "pyside6", marker = "sys_platform == 'win32'" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "torch", marker = "sys_platform == 'win32'" },
+    { name = "torchaudio", marker = "sys_platform == 'win32'" },
     { name = "torchvision", marker = "sys_platform == 'win32'" },
     { name = "ultralytics", marker = "sys_platform == 'win32'" },
 ]
@@ -123,7 +124,7 @@ dependencies = [
 requires-dist = [
     { name = "mss", specifier = ">=9.0.1" },
     { name = "numpy", specifier = ">=1.26.0,<2.0.0" },
-    { name = "onnxruntime-gpu", specifier = ">=1.22.0" },
+    { name = "onnxruntime-gpu", specifier = "==1.16.3" },
     { name = "opencv-contrib-python-headless", specifier = ">=4.9.0,<4.12.0" },
     { name = "opencv-python-headless", specifier = ">=4.9.0,<4.12.0" },
     { name = "psutil", specifier = ">=7.0.0" },
@@ -131,6 +132,7 @@ requires-dist = [
     { name = "pyside6", specifier = "==6.8.2.1" },
     { name = "pywin32", specifier = ">=311" },
     { name = "torch", specifier = "==2.0.1+cu117" },
+    { name = "torchaudio", specifier = ">=2.0.2" },
     { name = "torchvision", specifier = "==0.15.2+cu117" },
     { name = "ultralytics", specifier = ">=8.3.189" },
 ]
@@ -231,17 +233,15 @@ wheels = [
 
 [[package]]
 name = "numpy"
-version = "1.26.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/65/6e/09db70a523a96d25e115e71cc56a6f9031e7b8cd166c1ac8438307c14058/numpy-1.26.4.tar.gz", hash = "sha256:2a02aba9ed12e4ac4eb3ea9421c420301a0c6460d9830d74a9df87efa4912010", size = 15786129, upload-time = "2024-02-06T00:26:44.495Z" }
+version = "1.26.3"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/b7/a734c733286e10a7f1a8ad1ae8c90f2d33bf604a96548e0a4a3a6739b468/numpy-1.26.4-cp311-cp311-win32.whl", hash = "sha256:1af303d6b2210eb850fcf03064d364652b7120803a0b872f5211f5234b399f20", size = 5968812, upload-time = "2024-02-05T23:54:26.453Z" },
-    { url = "https://files.pythonhosted.org/packages/3f/6b/5610004206cf7f8e7ad91c5a85a8c71b2f2f8051a0c0c4d5916b76d6cbb2/numpy-1.26.4-cp311-cp311-win_amd64.whl", hash = "sha256:cd25bcecc4974d09257ffcd1f098ee778f7834c3ad767fe5db785be9a4aa9cb2", size = 15811913, upload-time = "2024-02-05T23:54:53.933Z" },
+    { url = "https://download.pytorch.org/whl/numpy-1.26.3-cp311-cp311-win_amd64.whl", hash = "sha256:39763aee6dfdd4878032361b30b2b12593fb445ddb66bbac802e2113eb8a6ac4" },
 ]
 
 [[package]]
 name = "onnxruntime-gpu"
-version = "1.22.0"
+version = "1.16.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "coloredlogs", marker = "sys_platform == 'win32'" },
@@ -252,7 +252,7 @@ dependencies = [
     { name = "sympy", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/47/313ee7998ef63dd7533200966972056fc5f3c7dd3bdfd9c49ae833bb5108/onnxruntime_gpu-1.22.0-cp311-cp311-win_amd64.whl", hash = "sha256:0f1719f7cca76075b398a7d0466ead62d78fd2b8c0ea053dcf65d80c813103e8", size = 214923507, upload-time = "2025-05-09T19:32:51.275Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/7c/7cb90b83e6f5f4c9d6085df8b2e3e8be762f75e25afcc62d71c0df66fb3f/onnxruntime_gpu-1.16.3-cp311-cp311-win_amd64.whl", hash = "sha256:48bb615aed61f5620d1ad46b9005614e1a14de60f8218a1448cc9a643f23d399", size = 141461435, upload-time = "2023-11-20T20:25:30.731Z" },
 ]
 
 [[package]]
@@ -559,6 +559,17 @@ dependencies = [
 ]
 wheels = [
     { url = "https://download.pytorch.org/whl/cu117/torch-2.0.1%2Bcu117-cp311-cp311-win_amd64.whl", hash = "sha256:a77ba4f4b13c8b6c2c863b84a98dde2ddf1feaad5f25700d41cf3236e11d2ee8" },
+]
+
+[[package]]
+name = "torchaudio"
+version = "2.0.2+cu117"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+dependencies = [
+    { name = "torch", marker = "sys_platform == 'win32'" },
+]
+wheels = [
+    { url = "https://download.pytorch.org/whl/cu117/torchaudio-2.0.2%2Bcu117-cp311-cp311-win_amd64.whl", hash = "sha256:2646876cfbffaf81275fddb09a69f4972d57f7cccf099598a09e8026aa86f7eb" },
 ]
 
 [[package]]

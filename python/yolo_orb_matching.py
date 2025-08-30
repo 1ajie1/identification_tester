@@ -28,8 +28,7 @@ class YOLOORBMatchingEngine:
             "nms_threshold": 0.4,  # NMS阈值
             "input_size": (416, 416),  # 输入尺寸
             "model_path": "",  # YOLO模型路径
-            "config_path": "",  # YOLO配置路径
-            "classes_path": "",  # 类别文件路径
+            "device": "cpu",  # 设备选择: cpu, cuda
         }
 
         # 默认ORB配置（复用feature_matching的配置）
@@ -76,103 +75,10 @@ class YOLOORBMatchingEngine:
         """
         try:
             if model_path and model_path.strip():
-                # 加载真实的YOLO模型
+                # 加载真实的YOLO模型（使用PyTorch/ultralytics）
                 logger.info(f"尝试加载YOLO模型: {model_path}")
-                # 这里应该根据模型文件格式加载模型
-                # 示例：
-                # if model_path.endswith('.weights'):
-                #     self.yolo_net = cv2.dnn.readNet(model_path, config_path)
-                # elif model_path.endswith('.pt'):
-                #     # 使用torch加载PyTorch模型
-                #     pass
-                # elif model_path.endswith('.onnx'):
-                #     # 使用ONNX Runtime加载
-                #     pass
-                logger.warning(f"YOLO模型加载功能开发中: {model_path}")
-
-            # 模拟一些常见的类别
-            self.yolo_classes = [
-                "person",
-                "bicycle",
-                "car",
-                "motorbike",
-                "aeroplane",
-                "bus",
-                "train",
-                "truck",
-                "boat",
-                "traffic light",
-                "fire hydrant",
-                "stop sign",
-                "parking meter",
-                "bench",
-                "bird",
-                "cat",
-                "dog",
-                "horse",
-                "sheep",
-                "cow",
-                "elephant",
-                "bear",
-                "zebra",
-                "giraffe",
-                "backpack",
-                "umbrella",
-                "handbag",
-                "tie",
-                "suitcase",
-                "frisbee",
-                "skis",
-                "snowboard",
-                "sports ball",
-                "kite",
-                "baseball bat",
-                "baseball glove",
-                "skateboard",
-                "surfboard",
-                "tennis racket",
-                "bottle",
-                "wine glass",
-                "cup",
-                "fork",
-                "knife",
-                "spoon",
-                "bowl",
-                "banana",
-                "apple",
-                "sandwich",
-                "orange",
-                "broccoli",
-                "carrot",
-                "hot dog",
-                "pizza",
-                "donut",
-                "cake",
-                "chair",
-                "sofa",
-                "pottedplant",
-                "bed",
-                "diningtable",
-                "toilet",
-                "tvmonitor",
-                "laptop",
-                "mouse",
-                "remote",
-                "keyboard",
-                "cell phone",
-                "microwave",
-                "oven",
-                "toaster",
-                "sink",
-                "refrigerator",
-                "book",
-                "clock",
-                "vase",
-                "scissors",
-                "teddy bear",
-                "hair drier",
-                "toothbrush",
-            ]
+                # 支持格式：.pt（推荐）和.onnx
+                logger.info("YOLO+ORB将使用纯YOLO模块进行检测")
 
             logger.info(f"YOLO类别数量: {len(self.yolo_classes)}")
 
@@ -270,7 +176,7 @@ class YOLOORBMatchingEngine:
         self, image: np.ndarray, config: Dict[str, Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        使用YOLO检测图像中的对象
+        使用YOLO检测图像中的对象（委托给纯YOLO模块）
 
         Args:
             image: 输入图像
@@ -287,16 +193,16 @@ class YOLOORBMatchingEngine:
             yolo_config = self.default_yolo_config.copy()
             yolo_config.update(config)
 
-            logger.info("开始YOLO目标检测")
+            logger.info("开始YOLO目标检测（使用纯YOLO模块）")
 
-            # 检查是否需要重新加载模型
-            model_path = yolo_config.get("model_path", "")
-            if model_path and model_path.strip():
-                self.reload_model(model_path)
-
-            # YOLO检测功能开发中
-            logger.warning("YOLO检测功能开发中")
-            detections = []
+            # 导入并使用纯YOLO模块
+            from .yolo_matching_pure import pure_yolo_matcher
+            
+            # 设置设备
+            pure_yolo_matcher.set_device(self.device)
+            
+            # 执行检测
+            detections = pure_yolo_matcher.detect_objects_yolo(image, yolo_config)
 
             logger.info(f"YOLO检测到 {len(detections)} 个目标")
             return detections

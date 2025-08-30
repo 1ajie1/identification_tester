@@ -10,6 +10,13 @@ ApplicationWindow {
     visible: true
     title: "图片匹配器 - 显示窗口"
     flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
+    
+    // 阻止默认的关闭行为，只隐藏窗口
+    onClosing: function(close) {
+        close.accepted = false  // 阻止默认关闭
+        displayWindow.hide()    // 只隐藏窗口
+        addLog("显示窗口已隐藏 - 可通过托盘菜单重新显示", "info")
+    }
 
     // 现代化的颜色主题
     property color primaryColor: "#2196F3"
@@ -38,11 +45,17 @@ ApplicationWindow {
     }
 
     // 主显示区域 - 只保留核心显示功能
+    
+    // 状态栏数据
+    property real currentFPS: 0.0
+    property real currentLatency: 0.0
+    property string deviceInfo: "CPU"
 
     StackLayout {
         id: displayStack
         anchors.fill: parent
         anchors.margins: 20
+        anchors.bottomMargin: 60  // 为状态栏留出空间
         currentIndex: controller.currentMode
 
         // 双图片模式显示
@@ -476,15 +489,7 @@ ApplicationWindow {
                     }
                 }
 
-                // 区域信息显示
-                Text {
-                    Layout.fillWidth: true
-                    text: controller.selectedWindow ? "实时显示: " + controller.selectedWindow : "未选择区域"
-                    font.pixelSize: 12
-                    color: "#666666"
-                    elide: Text.ElideMiddle
-                    horizontalAlignment: Text.AlignHCenter
-                }
+
             }
         }
     }
@@ -693,5 +698,86 @@ ApplicationWindow {
                 screenAreaImage.source = imagePath ? "file:///" + imagePath : "";
             }
         }
+
+        function onPerformanceInfoUpdated(fps, latency, device) {
+            console.log("QML接收到性能信息:", fps, latency, device);
+            updatePerformanceInfo(fps, latency, device);
+        }
+    }
+
+    // 状态栏
+    Rectangle {
+        id: statusBar
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 40
+        color: "#2E2E2E"
+        border.color: "#404040"
+        border.width: 1
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 10
+            spacing: 20
+
+            // 左侧：区域和图像信息
+            Text {
+                text: {
+                    if (!controller.selectedWindow) return "未选择区域"
+                    if (!controller.screenAreaImagePath) return `已选择: ${controller.selectedWindow}`
+                    
+                    // 直接使用selectedWindow，避免重复显示尺寸信息
+                    return `实时显示: ${controller.selectedWindow}`
+                }
+                color: "#CCCCCC"
+                font.pixelSize: 11
+                elide: Text.ElideMiddle
+                Layout.maximumWidth: 400  // 限制最大宽度避免过长
+            }
+
+            // 中间弹簧
+            Item {
+                Layout.fillWidth: true
+            }
+
+            // 右侧：性能信息
+            RowLayout {
+                spacing: 15
+                
+                // 设备信息
+                Text {
+                    text: `设备: ${deviceInfo}`
+                    color: deviceInfo.includes("CUDA") || deviceInfo.includes("GPU") ? "#4CAF50" : "#FFC107"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+
+                // FPS
+                Text {
+                    text: `FPS: ${currentFPS.toFixed(1)}`
+                    color: currentFPS > 20 ? "#4CAF50" : currentFPS > 10 ? "#FFC107" : "#F44336"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+
+                // 延迟
+                Text {
+                    text: `延迟: ${currentLatency.toFixed(1)}ms`
+                    color: currentLatency < 50 ? "#4CAF50" : currentLatency < 100 ? "#FFC107" : "#F44336"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+            }
+        }
+    }
+
+    // 更新状态栏信息的函数
+    function updatePerformanceInfo(fps, latency, device) {
+        console.log("更新性能信息:", fps, latency, device);
+        currentFPS = fps || 0.0;
+        currentLatency = latency || 0.0;
+        deviceInfo = device || "CPU";
+        console.log("更新后的值:", currentFPS, currentLatency, deviceInfo);
     }
 }

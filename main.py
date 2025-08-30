@@ -6,9 +6,11 @@ import numpy as np
 import logging
 
 
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QmlElement, QQmlApplicationEngine
 from PySide6.QtCore import QObject, Signal, Slot, Property, QUrl, Qt
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtGui import QAction
 print("策略：", QGuiApplication.highDpiScaleFactorRoundingPolicy())
 
 from python.template_matching import template_matcher
@@ -43,6 +45,11 @@ class ImageMatcherController(QObject):
     showMultipleDetections = Signal(str)  # 显示多个检测结果 (detections_json)
     realtimeDetectionStateChanged = Signal(bool)  # 实时检测状态变化 (active)
     clearAllDetections = Signal()  # 清除所有检测结果
+    performanceInfoUpdated = Signal(float, float, str)  # 性能信息更新 (fps, latency_ms, device)
+    showControlWindowSignal = Signal()  # 显示控制窗口信号
+    hideControlWindowSignal = Signal()  # 隐藏控制窗口信号
+    showDisplayWindowSignal = Signal()  # 显示显示窗口信号
+    hideDisplayWindowSignal = Signal()  # 隐藏显示窗口信号
 
     def __init__(self):
         super().__init__()
@@ -837,6 +844,7 @@ class ImageMatcherController(QObject):
 
     def _executeScreenPureYOLOMatching(self):
         """执行屏幕纯YOLO匹配"""
+        logger.info("🔍 开始执行_executeScreenPureYOLOMatching方法")
         try:
             import cv2
             import tempfile
@@ -872,6 +880,10 @@ class ImageMatcherController(QObject):
             detections = pure_yolo_matcher.detect_objects_yolo(
                 window_screenshot, config
             )
+            
+            # 获取性能统计
+            performance_stats = pure_yolo_matcher.get_performance_stats()
+            logger.info(f"性能统计数据: {performance_stats}")
 
             if detections:
                 # 构造结果，使用置信度最高的检测作为主要结果
@@ -887,6 +899,7 @@ class ImageMatcherController(QObject):
                     "method": "Pure_YOLO_Screen",
                     "detection_count": len(detections),
                     "all_detections": detections,
+                    "performance": performance_stats,
                 }
             else:
                 result = None
@@ -993,6 +1006,8 @@ class ImageMatcherController(QObject):
                     # 发送检测结果到前端
                     detections_json = json.dumps(screen_detections)
                     self.showMultipleDetections.emit(detections_json)
+                    
+
                 else:
                     # 显示单个屏幕匹配覆盖层（向后兼容）
                     # 物理坐标转换为逻辑坐标
@@ -1021,6 +1036,20 @@ class ImageMatcherController(QObject):
 
             else:
                 self.logAdded.emit("屏幕纯YOLO匹配失败", "warning")
+
+            # 发送性能信息（无论检测是否成功）
+            logger.info(f"准备发送性能信息，performance_stats是否存在: {bool(performance_stats)}")
+            if performance_stats:
+                device_info = self._current_device if hasattr(self, '_current_device') else "CPU"
+                logger.info(f"发送性能信息: FPS={performance_stats.get('fps', 0.0):.1f}, 延迟={performance_stats.get('latency_ms', 0.0):.1f}ms, 设备={device_info}")
+                self.performanceInfoUpdated.emit(
+                    float(performance_stats.get("fps", 0.0)),
+                    float(performance_stats.get("latency_ms", 0.0)), 
+                    str(device_info)
+                )
+                logger.info("性能信息信号已发送")
+            else:
+                logger.warning("performance_stats为空，无法发送性能信息")
 
         except Exception as e:
             self.logAdded.emit(f"屏幕纯YOLO匹配过程中发生错误: {str(e)}", "error")
@@ -1738,6 +1767,17 @@ class ImageMatcherController(QObject):
             # 执行YOLO检测
             result = pure_yolo_matcher.match_with_pure_yolo(None, screenshot_cv, config)
             
+            # 发送性能信息（实时检测）
+            if result and result.get("performance"):
+                perf = result["performance"]
+                device_info = self._current_device if hasattr(self, '_current_device') else "CPU"
+                logger.info(f"实时检测性能信息: FPS={perf.get('fps', 0.0):.1f}, 延迟={perf.get('latency_ms', 0.0):.1f}ms, 设备={device_info}")
+                self.performanceInfoUpdated.emit(
+                    float(perf.get("fps", 0.0)),
+                    float(perf.get("latency_ms", 0.0)), 
+                    str(device_info)
+                )
+            
             if result and result.get("all_detections"):
                 # 转换检测结果坐标
                 all_detections = result["all_detections"]
@@ -1865,16 +1905,40 @@ class ImageMatcherController(QObject):
             self.logAdded.emit(f"获取窗口列表失败: {str(e)}", "error")
             return json.dumps([])
 
+    # 托盘窗口管理相关的方法
+    @Slot()
+    def showControlWindow(self):
+        """显示控制窗口 - 供托盘调用"""
+        self.showControlWindowSignal.emit()
+    
+    @Slot()
+    def hideControlWindow(self):
+        """隐藏控制窗口 - 供托盘调用"""
+        self.hideControlWindowSignal.emit()
+    
+    @Slot()
+    def showDisplayWindow(self):
+        """显示显示窗口 - 供托盘调用"""
+        self.showDisplayWindowSignal.emit()
+    
+    @Slot()
+    def hideDisplayWindow(self):
+        """隐藏显示窗口 - 供托盘调用"""
+        self.hideDisplayWindowSignal.emit()
+
+
 
 class ImageMatcherApp:
     def __init__(self):
         # 启用高DPI支持
-
-        self.app = QGuiApplication(sys.argv)
+        self.app = QApplication(sys.argv)
         self.controller = ImageMatcherController()
 
         # 设置QML样式为Material以支持自定义样式
         os.environ["QT_QUICK_CONTROLS_STYLE"] = "Material"
+        
+        # 设置系统托盘
+        self.setup_system_tray()
 
         # 创建QML引擎
         self.engine = QQmlApplicationEngine()
@@ -1892,6 +1956,102 @@ class ImageMatcherApp:
         # 检查是否成功加载
         if not self.engine.rootObjects():
             sys.exit(-1)
+
+    def setup_system_tray(self):
+        """设置系统托盘"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("系统托盘不可用")
+            return
+
+        # 创建系统托盘图标
+        self.tray_icon = QSystemTrayIcon(self.app)
+        
+        # 设置托盘图标
+        try:
+            from PySide6.QtGui import QPixmap, QPainter, QBrush
+            from PySide6.QtCore import QSize
+            pixmap = QPixmap(QSize(16, 16))
+            pixmap.fill(Qt.blue)
+            painter = QPainter(pixmap)
+            painter.setBrush(QBrush(Qt.white))
+            painter.drawEllipse(4, 4, 8, 8)
+            painter.end()
+            icon = QIcon(pixmap)
+        except:
+            # 如果出错，使用系统默认图标
+            icon = self.app.style().standardIcon(self.app.style().StandardPixmap.SP_ComputerIcon)
+        
+        self.tray_icon.setIcon(icon)
+        self.tray_icon.setToolTip("图片匹配器")
+
+        # 创建托盘菜单
+        tray_menu = QMenu()
+        
+        # 控制面板操作
+        show_control_action = QAction("显示控制面板", self.app)
+        show_control_action.triggered.connect(self.show_control_window)
+        tray_menu.addAction(show_control_action)
+        
+        hide_control_action = QAction("隐藏控制面板", self.app)
+        hide_control_action.triggered.connect(self.hide_control_window)
+        tray_menu.addAction(hide_control_action)
+        
+        tray_menu.addSeparator()
+        
+        # 显示面板操作
+        show_display_action = QAction("显示显示面板", self.app)
+        show_display_action.triggered.connect(self.show_display_window)
+        tray_menu.addAction(show_display_action)
+        
+        hide_display_action = QAction("隐藏显示面板", self.app)
+        hide_display_action.triggered.connect(self.hide_display_window)
+        tray_menu.addAction(hide_display_action)
+        
+        tray_menu.addSeparator()
+        
+        # 退出操作
+        quit_action = QAction("退出程序", self.app)
+        quit_action.triggered.connect(self.quit_application)
+        tray_menu.addAction(quit_action)
+        
+        self.tray_icon.setContextMenu(tray_menu)
+        
+        # 双击托盘图标显示主窗口
+        self.tray_icon.activated.connect(self.tray_icon_activated)
+        
+        # 显示托盘图标
+        self.tray_icon.show()
+
+    def tray_icon_activated(self, reason):
+        """托盘图标被激活"""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.show_control_window()
+
+    def show_control_window(self):
+        """显示控制窗口"""
+        logger.info("托盘请求显示控制窗口")
+        self.controller.showControlWindow()
+
+    def hide_control_window(self):
+        """隐藏控制窗口"""
+        logger.info("托盘请求隐藏控制窗口")
+        self.controller.hideControlWindow()
+
+    def show_display_window(self):
+        """显示显示窗口"""
+        logger.info("托盘请求显示显示窗口")
+        self.controller.showDisplayWindow()
+
+    def hide_display_window(self):
+        """隐藏显示窗口"""
+        logger.info("托盘请求隐藏显示窗口")
+        self.controller.hideDisplayWindow()
+
+    def quit_application(self):
+        """退出应用程序"""
+        if hasattr(self, 'tray_icon') and self.tray_icon:
+            self.tray_icon.hide()
+        self.app.quit()
 
     def run(self):
         """运行应用程序"""

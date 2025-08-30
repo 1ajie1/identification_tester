@@ -27,8 +27,7 @@ class PureYOLOMatchingEngine:
             "nms_threshold": 0.4,  # NMS阈值
             "input_size": (416, 416),  # 输入尺寸
             "model_path": "",  # YOLO模型路径
-            "config_path": "",  # YOLO配置路径
-            "classes_path": "",  # 类别文件路径
+            "device": "cpu",  # 设备选择: cpu, cuda
         }
 
         # YOLO网络（如果可用）
@@ -39,8 +38,42 @@ class PureYOLOMatchingEngine:
         # 设备设置
         self.device = "cpu"  # 默认使用CPU
 
+        # 性能统计
+        self.performance_stats = {
+            "fps": 0.0,
+            "latency_ms": 0.0,
+            "last_inference_time": 0.0,
+            "inference_count": 0,
+            "total_time": 0.0
+        }
+
         # 初始化YOLO（如果模型可用）
         self._init_yolo()
+
+    def update_performance_stats(self, inference_time: float):
+        """
+        更新性能统计数据
+        
+        Args:
+            inference_time: 推理时间（秒）
+        """
+        self.performance_stats["last_inference_time"] = inference_time
+        self.performance_stats["latency_ms"] = inference_time * 1000  # 转换为毫秒
+        self.performance_stats["inference_count"] += 1
+        self.performance_stats["total_time"] += inference_time
+        
+        # 计算平均FPS（基于最近的推理时间）
+        if inference_time > 0:
+            self.performance_stats["fps"] = 1.0 / inference_time
+
+    def get_performance_stats(self) -> Dict[str, float]:
+        """
+        获取性能统计数据
+        
+        Returns:
+            包含FPS和延迟信息的字典
+        """
+        return self.performance_stats.copy()
 
     def _init_yolo(self, model_path: str = ""):
         """
@@ -210,131 +243,23 @@ class PureYOLOMatchingEngine:
                 logger.error("请检查模型文件路径是否正确")
                 return []
 
-            # 优先尝试使用PyTorch加载所有格式的模型
-            # PyTorch对YOLO模型支持更全面，包括YOLOv5/v8等
-            pytorch_result = self._detect_with_pytorch(image, config)
-            if pytorch_result:
-                return pytorch_result
-
-            # PyTorch失败或不可用，根据文件格式选择备用方案
-            if model_path.endswith(".onnx"):
-                logger.info("PyTorch不可用，尝试使用OpenCV DNN加载ONNX模型")
-                return self._detect_with_opencv_dnn(image, config)
-            elif model_path.endswith(".weights"):
-                logger.info("PyTorch不可用，尝试使用Darknet加载权重文件")
-                return self._detect_with_darknet(image, config)
-            elif model_path.endswith(".pt"):
-                logger.error("PyTorch模型加载失败且无备用方案")
-                logger.error("请确保已安装PyTorch: pip install torch torchvision")
-                return []
-            else:
-                logger.error(f"不支持的模型格式: {model_path}")
-                logger.error("支持的格式: .pt（推荐）, .onnx, .weights")
-                return []
+            # 只使用PyTorch后端进行推理
+            logger.info("使用PyTorch后端")
+            return self._detect_with_pytorch(image, config)
 
         except Exception as e:
             logger.error(f"真实YOLO检测失败: {e}")
             return []
 
-    def _detect_with_opencv_dnn(
-        self, image: np.ndarray, config: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        使用OpenCV DNN模块检测ONNX模型
-        """
-        try:
-            model_path = config.get("model_path", "")
-            confidence_threshold = config.get("confidence_threshold", 0.5)
-            nms_threshold = config.get("nms_threshold", 0.4)
 
-            # 加载ONNX模型
-            net = cv2.dnn.readNetFromONNX(model_path)
 
-            # 预处理图像
-            blob = cv2.dnn.blobFromImage(
-                image, 1 / 255.0, (640, 640), swapRB=True, crop=False
-            )
-            net.setInput(blob)
 
-            # 前向推理
-            outputs = net.forward()
-
-            # 解析输出
-            detections = []
-            h, w = image.shape[:2]
-
-            for output in outputs:
-                for detection in output:
-                    scores = detection[5:]
-                    class_id = np.argmax(scores)
-                    confidence = scores[class_id]
-
-                    if confidence > confidence_threshold:
-                        # 转换坐标
-                        center_x = int(detection[0] * w)
-                        center_y = int(detection[1] * h)
-                        width = int(detection[2] * w)
-                        height = int(detection[3] * h)
-
-                        x = int(center_x - width / 2)
-                        y = int(center_y - height / 2)
-
-                        detections.append(
-                            {
-                                "x": x,
-                                "y": y,
-                                "width": width,
-                                "height": height,
-                                "confidence": float(confidence),
-                                "class_id": int(class_id),
-                                "class_name": (
-                                    self.yolo_classes[class_id]
-                                    if class_id < len(self.yolo_classes)
-                                    else f"class_{class_id}"
-                                ),
-                            }
-                        )
-
-            # 应用NMS
-            if len(detections) > 1:
-                boxes = [[d["x"], d["y"], d["width"], d["height"]] for d in detections]
-                scores = [d["confidence"] for d in detections]
-                indices = cv2.dnn.NMSBoxes(
-                    boxes, scores, confidence_threshold, nms_threshold
-                )
-
-                if len(indices) > 0:
-                    detections = [detections[i] for i in indices.flatten()]
-
-            logger.info(f"OpenCV DNN检测到 {len(detections)} 个目标")
-            return detections
-
-        except Exception as e:
-            logger.error(f"OpenCV DNN检测失败: {e}")
-            logger.error("可能原因：模型文件损坏、格式不兼容或缺少依赖")
-            return []
-
-    def _detect_with_darknet(
-        self, image: np.ndarray, config: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
-        """
-        使用Darknet权重文件检测
-        """
-        try:
-            # Darknet检测需要配置文件(.cfg)和类别文件(.names)
-            logger.error("Darknet检测功能暂未实现")
-            logger.error("需要对应的.cfg配置文件和.names类别文件")
-            logger.error("建议使用.onnx格式的模型文件")
-            return []
-        except Exception as e:
-            logger.error(f"Darknet检测失败: {e}")
-            return []
 
     def _detect_with_pytorch(
         self, image: np.ndarray, config: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        使用PyTorch模型检测
+        使用PyTorch模型检测（支持.pt和.onnx格式）
         """
         try:
             # 尝试导入PyTorch相关库
@@ -342,151 +267,110 @@ class PureYOLOMatchingEngine:
                 import torch
                 import torchvision
             except ImportError as e:
-                logger.warning(f"PyTorch库未安装: {e}")
-                logger.info("可使用命令安装: pip install torch torchvision")
+                logger.error(f"PyTorch库未安装: {e}")
+                logger.error("请使用命令安装: pip install torch torchvision")
                 return []
 
             model_path = config.get("model_path", "")
             confidence_threshold = config.get("confidence_threshold", 0.5)
 
-            logger.info(f"尝试使用PyTorch加载模型: {model_path}")
+            logger.info(f"使用PyTorch加载模型: {model_path}")
 
-            # 尝试加载不同格式的模型
-            if model_path.endswith(".pt"):
-                return self._load_pytorch_model(image, model_path, confidence_threshold)
-            elif model_path.endswith(".onnx"):
-                return self._load_onnx_with_torch(
-                    image, model_path, confidence_threshold
-                )
-            elif model_path.endswith(".weights"):
-                # 对于weights文件，尝试使用ultralytics
-                return self._load_ultralytics_model(
-                    image, model_path, confidence_threshold
-                )
+            # 支持的格式：.pt 和 .onnx
+            if model_path.endswith((".pt", ".onnx")):
+                return self._load_ultralytics_model(image, model_path, confidence_threshold)
             else:
-                logger.warning(f"PyTorch不支持此格式: {model_path}")
+                logger.error(f"不支持的模型格式: {model_path}")
+                logger.error("支持的格式: .pt（推荐）, .onnx")
                 return []
 
         except Exception as e:
-            logger.warning(f"PyTorch检测失败: {e}")
-            return []
-
-    def _load_pytorch_model(
-        self, image: np.ndarray, model_path: str, confidence_threshold: float
-    ) -> List[Dict[str, Any]]:
-        """加载PyTorch .pt模型"""
-        try:
-            import torch
-
-            # 尝试使用ultralytics库（推荐）
-            try:
-                from ultralytics import YOLO
-
-                model = YOLO(model_path)
-                
-                # 设置设备
-                if self.device != "cpu":
-                    model.to(self.device)
-                    logger.info(f"YOLO模型已移动到设备: {self.device}")
-                
-                results = model(image, conf=confidence_threshold, verbose=False, device=self.device)
-
-                detections = []
-                for result in results:
-                    boxes = result.boxes
-                    if boxes is not None:
-                        for box in boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            conf = box.conf[0].cpu().numpy()
-                            cls = int(box.cls[0].cpu().numpy())
-
-                            detections.append(
-                                {
-                                    "x": int(x1),
-                                    "y": int(y1),
-                                    "width": int(x2 - x1),
-                                    "height": int(y2 - y1),
-                                    "confidence": float(conf),
-                                    "class_id": cls,
-                                    "class_name": model.names.get(cls, f"class_{cls}"),
-                                }
-                            )
-
-                logger.info(f"Ultralytics YOLO检测到 {len(detections)} 个目标")
-                return detections
-
-            except ImportError:
-                logger.warning("未安装ultralytics库，尝试使用torch直接加载")
-                # 尝试直接使用torch加载
-                model = torch.load(model_path, map_location="cpu")
-                logger.warning("直接torch加载暂未实现推理逻辑")
-                return []
-
-        except Exception as e:
-            logger.error(f"PyTorch模型加载失败: {e}")
-            return []
-
-    def _load_onnx_with_torch(
-        self, image: np.ndarray, model_path: str, confidence_threshold: float
-    ) -> List[Dict[str, Any]]:
-        """使用PyTorch加载ONNX模型"""
-        try:
-            # 尝试使用ultralytics加载ONNX
-            try:
-                from ultralytics import YOLO
-
-                model = YOLO(model_path)
-                results = model(image, conf=confidence_threshold, verbose=False)
-
-                detections = []
-                for result in results:
-                    boxes = result.boxes
-                    if boxes is not None:
-                        for box in boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            conf = box.conf[0].cpu().numpy()
-                            cls = int(box.cls[0].cpu().numpy())
-
-                            detections.append(
-                                {
-                                    "x": int(x1),
-                                    "y": int(y1),
-                                    "width": int(x2 - x1),
-                                    "height": int(y2 - y1),
-                                    "confidence": float(conf),
-                                    "class_id": cls,
-                                    "class_name": f"class_{cls}",
-                                }
-                            )
-
-                logger.info(f"Ultralytics ONNX检测到 {len(detections)} 个目标")
-                return detections
-
-            except ImportError:
-                logger.warning("ultralytics库不可用，回退到OpenCV")
-                return []
-
-        except Exception as e:
-            logger.warning(f"PyTorch ONNX加载失败: {e}")
+            logger.error(f"PyTorch检测失败: {e}")
             return []
 
     def _load_ultralytics_model(
         self, image: np.ndarray, model_path: str, confidence_threshold: float
     ) -> List[Dict[str, Any]]:
-        """使用ultralytics加载weights文件"""
+        """使用ultralytics加载YOLO模型（支持.pt和.onnx格式）"""
         try:
             from ultralytics import YOLO
+            import torch
 
-            # ultralytics通常不直接支持.weights文件
-            logger.warning("ultralytics不直接支持.weights文件")
-            logger.info("建议将.weights转换为.pt格式")
-            return []
+            model = YOLO(model_path)
+            
+            # 智能设备选择
+            device = self.device
+            
+            # 检查CUDA可用性
+            if device.startswith('cuda') and not torch.cuda.is_available():
+                logger.warning(f"CUDA设备 {device} 不可用，回退到CPU")
+                device = 'cpu'
+            
+            # 根据模型格式设置设备
+            if model_path.endswith('.onnx'):
+                # ONNX模型需要检查ONNX Runtime的CUDA支持
+                try:
+                    import onnxruntime as ort
+                    providers = ort.get_available_providers()
+                    if device.startswith('cuda') and 'CUDAExecutionProvider' in providers:
+                        logger.info(f"ONNX模型将使用CUDA设备: {device}")
+                        logger.info(f"ONNX Runtime providers: {providers}")
+                    elif device.startswith('cuda'):
+                        logger.warning("ONNX Runtime不支持CUDA，使用CPU")
+                        device = 'cpu'
+                    else:
+                        logger.info(f"ONNX模型使用CPU设备")
+                except ImportError:
+                    logger.warning("未找到onnxruntime，ONNX推理可能失败")
+            else:
+                # .pt模型可以使用model.to()移动到设备
+                if device != "cpu":
+                    model.to(device)
+                    logger.info(f"PyTorch模型已移动到设备: {device}")
+            
+            # 执行推理并记录时间
+            logger.info(f"开始推理，使用设备: {device}")
+            start_time = time.time()
+            results = model(image, conf=confidence_threshold, verbose=False, device=device)
+            inference_time = time.time() - start_time
+            
+            # 更新性能统计
+            self.update_performance_stats(inference_time)
+
+            detections = []
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    for box in boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = box.conf[0].cpu().numpy()
+                        cls = int(box.cls[0].cpu().numpy())
+
+                        detections.append(
+                            {
+                                "x": int(x1),
+                                "y": int(y1),
+                                "width": int(x2 - x1),
+                                "height": int(y2 - y1),
+                                "confidence": float(conf),
+                                "class_id": cls,
+                                "class_name": model.names.get(cls, f"class_{cls}"),
+                            }
+                        )
+
+            # 记录性能信息
+            stats = self.get_performance_stats()
+            logger.info(f"Ultralytics YOLO检测到 {len(detections)} 个目标")
+            logger.info(f"推理性能 - FPS: {stats['fps']:.1f}, 延迟: {stats['latency_ms']:.1f}ms")
+            return detections
 
         except ImportError:
-            logger.warning("ultralytics库不可用")
+            logger.error("未安装ultralytics库")
+            logger.error("请使用命令安装: pip install ultralytics")
             return []
         except Exception as e:
-            logger.warning(f"ultralytics加载失败: {e}")
+            logger.error(f"ultralytics模型加载失败: {e}")
+            logger.error("建议：如果使用ONNX模型遇到问题，请尝试使用.pt格式的模型")
             return []
 
     def _detect_with_simulated_yolo(
@@ -591,7 +475,10 @@ class PureYOLOMatchingEngine:
                 # 找到置信度最高的检测结果
                 best_detection = max(detections, key=lambda x: x.get("confidence", 0))
 
-                # 构造匹配结果，包含所有检测结果
+                # 获取性能统计
+                stats = self.get_performance_stats()
+
+                # 构造匹配结果，包含所有检测结果和性能数据
                 result = {
                     "x": best_detection["x"],
                     "y": best_detection["y"],
@@ -604,6 +491,7 @@ class PureYOLOMatchingEngine:
                     "match_time": time.time(),
                     "detection_count": len(detections),
                     "all_detections": detections,  # 包含所有检测结果
+                    "performance": stats,  # 添加性能数据
                 }
 
                 logger.info("纯YOLO匹配成功")
